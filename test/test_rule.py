@@ -111,3 +111,18 @@ class TestRule:
         assert f"/Test_Metric#fail1 < {threshold}" in f"{e}"
         assert "#pass1" not in f"{e}"
         assert "#pass2" not in f"{e}"
+
+    def test_validate_exclusion(self):
+        threshold = 100.0
+        composite_metric = CompositeMetric(name="Test_Metric")
+        metric = Metric(name="fail1", value=99.0)
+        composite_metric.add(metric)
+        metric = Metric(name="pass1", value=threshold)
+        composite_metric.add(metric)
+        metric = Metric(name="pass2", value=110.0)
+        composite_metric.add(metric)
+        # Same test as above, but with exclusions:
+        rule = Rule("/Test_Metric#fail1", operation=Rule.Evaluation.GREATER_THAN_OR_EQUAL, limiting_value=threshold)
+        rule.validate(composite_metric, exclusions={"/TestMetric*fail1"})
+        # does not throw exception
+

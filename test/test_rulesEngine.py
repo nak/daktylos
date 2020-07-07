@@ -1,3 +1,4 @@
+import fnmatch
 import os
 from pathlib import Path
 
@@ -29,8 +30,11 @@ class TestRulesEngine:
     def test_process(self, monkeypatch):
         validations = []
 
-        def mock_validate(self, composite_metric):
+        def mock_validate(self, composite_metric, exclusions=None):
             nonlocal validations
+            assert exclusions == {"/CodeCoverage/by_file*test_excluded.py"}
+            if fnmatch.fnmatchcase(self._pattern, "/CodeCoverage/by_file*test_excluded.py"):
+                return
             validations.append((self, composite_metric))
             if self._pattern == "/CodeCoverage#overall" and self._limit > 81.0:
                 raise Rule.ThresholdViolation(msg="failure_validation_codecov", parent=composite_metric,
@@ -68,24 +72,42 @@ class TestRulesEngine:
         rules_path = Path(os.path.join(resources_path, "test_rules.yaml"))
         rules_engine = RulesEngine.from_yaml_file(rules_path)
         assert len(rules_engine._alerts) == 2
-        assert len(rules_engine._validations) == 4
-        assert rules_engine._alerts[0]._operation == Rule.Evaluation.GREATER_THAN
-        assert rules_engine._alerts[0]._pattern == "/CodeCoverage#overall"
-        assert pytest.approx(rules_engine._alerts[0]._limit, 80.0)
-        assert rules_engine._alerts[1]._operation == Rule.Evaluation.LESS_THAN
-        assert rules_engine._alerts[1]._pattern == "/Performance#overall_cpu"
-        assert pytest.approx(rules_engine._alerts[1]._limit, 70.0)
-        assert rules_engine._validations[0]._operation == Rule.Evaluation.GREATER_THAN_OR_EQUAL
-        assert rules_engine._validations[0]._pattern == "/CodeCoverage#overall"
-        assert pytest.approx(rules_engine._validations[0]._limit, 85.0)
-        assert rules_engine._validations[1]._operation == Rule.Evaluation.GREATER_THAN
-        assert rules_engine._validations[1]._pattern == "/CodeCoverage/by_file#test/test_composite_metric.py"
-        assert pytest.approx(rules_engine._validations[1]._limit, 90.0)
-        assert rules_engine._validations[2]._operation == Rule.Evaluation.LESS_THAN
-        assert rules_engine._validations[2]._pattern == \
-               "/Performance/by_test#test_SQLMetricsStore.test_metrics_by_date_with_filter"
-        assert pytest.approx(rules_engine._validations[2]._limit, 10.0)
-        assert rules_engine._validations[3]._operation == Rule.Evaluation.LESS_THAN_OR_EQUAL
-        assert rules_engine._validations[3]._pattern == \
-               "/Performance/by_test#test_SQLMetricsStore.test_metrics_by_volume_with_filter"
-        assert pytest.approx(rules_engine._validations[3]._limit, 11.0)
+        assert len(rules_engine._validations) == 5
+        for alert in rules_engine._alerts:
+            assert alert._pattern in {"/CodeCoverage#overall",
+                                     "/Performance#overall_cpu"
+                                      }
+            if alert._pattern == "/CodeCoverage#overall":
+                assert alert._operation == Rule.Evaluation.GREATER_THAN
+                assert pytest.approx(alert._limit, 80.0)
+            elif alert._pattern == "/Performance#overall_cpu":
+                assert alert._operation == Rule.Evaluation.LESS_THAN
+                assert pytest.approx(alert._limit, 70.0)
+            else:
+                assert False  # should never get here based on logic
+        for validation in rules_engine._validations:
+            assert validation._pattern in {
+                "/CodeCoverage#overall",
+                "/CodeCoverage/by_file#test/test_composite_metric.py",
+                "/CodeCoverage/by_file#test/test_excluded.py",
+                "/Performance/by_test#test_SQLMetricsStore.test_metrics_by_date_with_filter",
+                "/Performance/by_test#test_SQLMetricsStore.test_metrics_by_volume_with_filter"
+            }
+            if validation._pattern ==  "/CodeCoverage#overall":
+                assert validation._operation == Rule.Evaluation.GREATER_THAN_OR_EQUAL
+                assert pytest.approx(validation._limit, 85.0)
+            elif validation._pattern == "/CodeCoverage/by_file#test/test_composite_metric.py":
+                assert validation._operation == Rule.Evaluation.GREATER_THAN
+                assert pytest.approx(validation._limit, 90.0)
+            elif validation._pattern == "/Performance/by_test#test_SQLMetricsStore.test_metrics_by_date_with_filter":
+                assert validation._operation == Rule.Evaluation.LESS_THAN
+                assert pytest.approx(validation._limit, 10.0)
+            elif validation._pattern == "/Performance/by_test#test_SQLMetricsStore.test_metrics_by_volume_with_filter":
+                assert validation._operation == Rule.Evaluation.LESS_THAN_OR_EQUAL
+                assert pytest.approx(validation._limit, 11.0)
+            elif validation._pattern == "/CodeCoverage/by_file#test/test_excluded.py":
+                pass
+            else:
+                assert False
+
+        assert rules_engine._exclusions == {"/CodeCoverage/by_file*test_excluded.py"}

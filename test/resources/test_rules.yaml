@@ -2,6 +2,8 @@ decription: rules to use in test
 content:
   - ruleset:
       description: code coverage rules
+      exclusions:
+        - exclusion: /CodeCoverage/by_file*test_excluded.py
       rules:
         - action: confirm
           rule: /CodeCoverage#overall > 80.0
@@ -9,6 +11,8 @@ content:
           rule: /CodeCoverage#overall >= 85.0
         - action: validate
           rule: /CodeCoverage/by_file#test/test_composite_metric.py > 90.0
+        - action: validate
+          rule: /CodeCoverage/by_file#test/test_excluded.py > 90.0
   - ruleset:
       description: bogus performance rules
       rules:

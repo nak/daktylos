@@ -5,7 +5,7 @@ This package contains the logic for creating and applying validation rules for `
 import fnmatch
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional, Iterator, Iterable
+from typing import List, Optional, Iterator, Iterable, Set
 
 import yaml
 
@@ -69,7 +69,7 @@ class Rule:
     def description(self):
         return self._description
 
-    def validate(self, composite_metric: CompositeMetric) -> None:
+    def validate(self, composite_metric: CompositeMetric, exclusions: Optional[Iterable[str]] = None) -> None:
         """
         Valide a composite metric for any and all matching key-names for each of its components
 
@@ -80,13 +80,20 @@ class Rule:
         failed_elements: List[str] = []
         msg = ""
 
-        def apply_root(key):
+        def apply_root(key: str) -> str:
             if not key.startswith('#'):
                 return '/' + '/'.join([composite_metric.name, key])
             else:
                 return '/' + ''.join([composite_metric.name, key])
 
-        for key in [k for k in composite_metric.keys(core_metrics_only=True) if self._pattern == '*'
+        def excluded(key: str) -> bool:
+            for exclusion in exclusions:
+                if fnmatch.fnmatchcase(key, exclusion):
+                    return True
+            return False
+
+        for key in [k for k in composite_metric.keys(core_metrics_only=True) if
+                    not excluded(k) and self._pattern == '*'
                     or fnmatch.fnmatchcase(apply_root(k), self._pattern)]:
             if self._operation == Rule.Evaluation.LESS_THAN:
                 if composite_metric[key].value >= self._limit:
@@ -116,8 +123,9 @@ class RulesEngine:
     """
 
     def __init__(self):
-        self._alerts: List[Rule] = []
-        self._validations: List[Rule] = []
+        self._alerts: Set[Rule] = set()
+        self._validations: Set[Rule] = set()
+        self._exclusions: Set[str] = set()
 
     def add_alert(self, rule: Rule) -> None:
         """
@@ -125,7 +133,7 @@ class RulesEngine:
 
         :param rule: rule to add
         """
-        self._alerts.append(rule)
+        self._alerts.add(rule)
 
     def add_validation(self, rule: Rule):
         """
@@ -133,7 +141,14 @@ class RulesEngine:
 
         :param rule: rule to add
         """
-        self._validations.append(rule)
+        self._validations.add(rule)
+
+    def add_exclusion(self, pattern: str):
+        """
+        Exclude metrics from rules if they match the given pattern
+        :param pattern: a path-like object that indicates a relative path to a core metric within this composite
+        """
+        self._exclusions.add(pattern)
 
     def process(self, composite_metric: CompositeMetric) -> Iterator[ValidationStatus]:
         """
@@ -144,7 +159,7 @@ class RulesEngine:
         """
         for rule in self._alerts:
             try:
-                rule.validate(composite_metric)
+                rule.validate(composite_metric, self._exclusions)
             except Rule.ThresholdViolation as e:
                 failure = f"\n--------------------------------\nALERT: For rule '{rule.description}':\n{e}"
                 yield ValidationStatus(level=ValidationStatus.Level.ALERT,
@@ -153,7 +168,7 @@ class RulesEngine:
                                        offending_elements=e.offending_elements)
         for rule in self._validations:
             try:
-                rule.validate(composite_metric)
+                rule.validate(composite_metric, self._exclusions)
             except Rule.ThresholdViolation as e:
                 failure = f"\n--------------------------------\nVALIDATION FAILURE: For rule '{rule.description}':\n {e}"
                 yield ValidationStatus(level=ValidationStatus.Level.FAILURE,
@@ -199,6 +214,9 @@ class RulesEngine:
                     if not ruleset:
                         raise LookupError(f"Rules file {path} contains content devoid of ruleset elements")
                     description = ruleset.get('description', "<<none>>")
+                    exclusions = ruleset.get('exclusions', [])
+                    for exclusion in exclusions:
+                        rules_engine.add_exclusion(exclusion['exclusion'])
                     rules = ruleset.get('rules', [])
                     if not rules:
                         raise LookupError(
