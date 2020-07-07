@@ -269,6 +269,8 @@ class CompositeMetric(BasicMetric):
                     path, metric_name = key_path.split('#')
                 except ValueError:
                     raise KeyError("Path must contain at most one '#'")
+        elif '/' not in key_path:
+            return self.value[key_path]
         else:
             path = key_path
             metric_name = None

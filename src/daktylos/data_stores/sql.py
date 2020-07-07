@@ -70,9 +70,9 @@ class SQLCompositeMetric(Base):
 
 class SQLMetricStore(MetricStore):
     """
-    Concrete data store class for metrics storage, based on SQL and SqlAlchemy
+    Concrete data store class for metrics storage and retrieval, based on SQL and SqlAlchemy
 
-    :param engine: The *sqlalchemy* engine to use
+    :param engine: The *sqlalchemy* engine to use, as a uri
     """
     singleton = None
 

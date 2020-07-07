@@ -49,14 +49,14 @@ class TestSQLMetricStore:
 
         compare = {}
         for item in data_generator():
-            compare[int(item['child1'].value)] = item
+            compare[int(item['#child1'].value)] = item
             datastore.post(item, datetime.datetime.utcnow(), project_name="TestProject", uuid="test_uuid")
         assert datastore._session.query(SQLCompositeMetric).count() == 100
         for item in datastore._session.query(SQLCompositeMetric).all():
             index = int(item.children[0].value)
             assert item.children[1].value == compare[index]['child2']['grandchild2.1'].value
-            assert item.children[2].value == compare[index]['child2']['grandchild2.2'].value
-            assert item.children[3].value == compare[index]['child3']['grandchild3.1'].value
+            assert item.children[2].value == compare[index]['child2']['#grandchild2.2'].value
+            assert item.children[3].value == compare[index]['child3#grandchild3.1'].value
 
     def test_metrics_by_date(self, preloaded_datastore: SQLMetricStore):
         assert preloaded_datastore.metrics_by_date(metric_name="TestMetric",
