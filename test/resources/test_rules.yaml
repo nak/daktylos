@@ -1,0 +1,20 @@
+decription: rules to use in test
+content:
+  - ruleset:
+      description: code coverage rules
+      rules:
+        - action: confirm
+          rule: /CodeCoverage#overall > 80.0
+        - action: validate
+          rule: /CodeCoverage#overall >= 85.0
+        - action: validate
+          rule: /CodeCoverage/by_file#test/test_composite_metric.py > 90.0
+  - ruleset:
+      description: bogus performance rules
+      rules:
+        - action: confirm
+          rule: /Performance#overall_cpu < 70.0
+        - action: validate
+          rule: /Performance/by_test#test_SQLMetricsStore.test_metrics_by_date_with_filter < 10.0
+        - action: validate
+          rule: /Performance/by_test#test_SQLMetricsStore.test_metrics_by_volume_with_filter <= 11.0
