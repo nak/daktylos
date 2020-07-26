@@ -1,16 +1,19 @@
-- project_name: Daktylos
-- decription: rules to use in test
-- rules:
-    - description: code coverage rules
-    - action: confirm
-      rule: /Code_Coverage#overall > 80.0
-    - action: validate
-      rule: /Code_Coverage#overall >= 85.0
-    - action: validate
-      rule: /CodeCoverage/by_file#test/test_composite_metric.py >= 90.0
-- rules:
-    - description: bogus performance rules
-    - action: confirm
-      rule: /Performacne#overall_cpu < 70.0
-    - action: validate
-      rule: /Performacne/by_test#test_SQLMetricsStore.test_metrics_by_date_with_filter <= 10.0
+decription: rules to use in test
+content:
+  - ruleset:
+      description: code coverage rules
+      rules:
+        - action: confirm
+          rule: /Code_Coverage#overall > 80.0
+        - action: validate
+          rule: /Code_Coverage#overall >= 85.0
+        - action: validate
+          rule: /CodeCoverage/by_file#test/test_composite_metric.py >= 90.0
+  - ruleset:
+      description: performance rules
+      rules:
+        - description: bogus performance rules
+        - action: confirm
+          rule: /Performacne#overall_cpu < 2.0
+        - action: validate
+          rule: /Performacne/by_test#test_SQLMetricsStore.test_metrics_by_date_with_filter <= 1.0

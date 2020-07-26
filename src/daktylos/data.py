@@ -1,7 +1,42 @@
 """
-This package contains the classes used to define composite metrics, a hierarchical collection of floating point metric
+This module contains the classes used to define composite metrics, a hierarchical collection of floating point metric
 values.  It also defines the interface for collection and retrieval of those values from a data store.
+
+The constructs in this module are low-level generic constructs.  Top-level (root) `CompositeMetric` instances
+provide a general way for describing complex, related metric sets that makes it easy to serialize and deserialize
+the data for easier storage, access and rules specifications.  However, when developing an API around
+specific composite metrics, the recommended practice is to subclass off of a `CompositeMetric` class to provide
+a clean interface:
+
+>>> from daktylos.data import CompositeMetric
+...
+... class TestRunPerformanceMetics(CompositeMetric):
+...     def __init__(self, total_ucpu_secs: float, total_scpu_secs: float, total_duration: float,
+...                  memory_consumed_mb: float):
+...         super().__init__(self.__class__.__name__)
+...         super().add(Metric("total_user_cpu", total_ucpu_secs))
+...         super().add(Metric("total_system_cpu", total_scpu_secs))
+...         super().add(Metric("total_duration", total_duration))
+...         super().add(Metric("memory_consumed", memory_consumed_mb))
+...         self._by_test = CompositeMetric("by_test")
+...         super().add(self._by_test)
+...
+...     def add_test_performance(self, test_name: str, test_ucpu: float,
+...                              test_scpu: float, duration: float, test_memory_consumed: float):
+...         test_metrics = CompositeMetric(test_name)
+...         test_metrics.add(Metric("user_cpu", test_ucpu))
+...         test_metrics.add(Metric("user_spu", test_scpu))
+...         test_metrics.add(Metric("duration", duration))
+...         test_metrics.add(Metric("memory_consumed", test_memory_consumed))
+...         self._by_test.add(test_metrics)
+
+This class provides a target-specific interface for performance metrics for a test run, without the
+client having to know the details of the naming and hierarchy of the underlying `CompositeMetric`
+
+This module also provides the data abstraction for storing, retrieiving and purging metrics from an external
+data store. A SQL implmementation can be found in `daktylos.data_stores.sql`.
 """
+
 import datetime
 import multiprocessing
 import numbers

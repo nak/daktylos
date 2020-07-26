@@ -29,14 +29,32 @@ him or her about direct measurements of the code written, this seemed a fitting 
 Creating Metrics
 ================
 
-.. automodule:: daktylos.data
-
-*daktylos* is designed around capturing a set of related metrics in a hiearchy.  Composite metrics can be created
+*daktylos* is designed around capturing a set of related metrics in a hierarchy.  Composite metrics can be created
 in a leaf-branch style architecture, and child metrics can be referenced down through a hierarchy based on a
 dict-like interface.
 
-Composite Metrics
-=================
+.. automodule:: daktylos.data
+    :members: Metric, CompositeMetric
 
-.. autoclass:: daktylos.data.CompositeMetric
+Metrics Storage
+===============
 
+*daktylos* provides the ability to store, retrieve and purge metrics from a relational database.  It also probides
+the proper abstraction for data access:
+
+.. autoclass:: daktylos.data.MetricStore
+
+with the specific implementation via SQL and `SqlAlchemy <https://>` provided through the *daktylos.data_stores.sql`
+module:
+
+.. autoclass:: daktylos.data_stores.sql.SQLMetricStore
+
+Applying Rules to Metrics
+=========================
+
+One of the primary features of *daktylos* is the ability to easily apply threshold rules to metrics.  The client
+can validate a given set of metric values against user-defined rules to produce alerts or failures when they
+values are out of expected range.
+
+.. automodule:: daktylos.rules.status
+    :members: ValidationStatus

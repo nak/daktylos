@@ -13,6 +13,12 @@ content:
           rule: /CodeCoverage/by_file#test/test_composite_metric.py > 90.0
         - action: validate
           rule: /CodeCoverage/by_file#test/test_excluded.py > 90.0
+        - action: validate
+          rule: delta(/CodeCoverage#overall) >= -2.0
+        - action: confirm
+          rule: delta(/CodeCoverage/by_file#test/test_composite_metric.py) >= -1.0
+        - action: validate
+          rule: delta(/CodeCoverage/by_file#test/test_excluded.py) >= -5.0
   - ruleset:
       description: bogus performance rules
       rules:
