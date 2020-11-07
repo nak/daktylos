@@ -39,7 +39,7 @@ class TestCompositeMetric:
         child.add(grandchild)
         grandchild.add(Metric("test_metric3", test_value3))
         result = root.flatten()
-        new_root = BasicMetric.from_dict(result)
+        new_root = BasicMetric.from_flattened(result)
         assert result == new_root.flatten()
 
     def test_keys(self):

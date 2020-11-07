@@ -1,8 +1,9 @@
 import datetime
+from dataclasses import dataclass
 
 import pytest
 
-from daktylos.data import CompositeMetric, Metric, Metadata
+from daktylos.data import CompositeMetric, Metric, Metadata, MetricDataClass
 from daktylos.data_stores.sql import SQLMetricStore, SQLCompositeMetric, SQLMetadataSet, SQLMetadata
 
 
@@ -22,6 +23,40 @@ class TestSQLMetricStore:
         assert preloaded_datastore._session.query(SQLMetadata).count() == 6
         for item in preloaded_datastore._session.query(SQLCompositeMetric).all():
             assert int(item.children[0].value) < 51
+
+    def test_post_data(self, datastore: SQLMetricStore):
+        @dataclass
+        class ChildMetric(MetricDataClass):
+            grandchlid1: float
+            grandchild2: float
+
+        @dataclass
+        class TestMetric(MetricDataClass):
+            child1: int
+            child2: ChildMetric
+            child3: float
+
+        def data_generator():
+            seed = [1, 28832.12993, 0.00081238, 291]
+            for index in range(100):
+                test_metric = TestMetric(seed[0], ChildMetric(seed[1], seed[2]), seed[3])
+                yield test_metric
+                seed[0] += 1
+                seed[1] *= 0.9992
+                seed[2] *= 1.2
+                seed[3] -= 2
+
+        compare = {}
+        for item in data_generator():
+            compare[item.child1] = item
+            datastore.post_data("TestMetric", item,
+                                timestamp=datetime.datetime.utcnow(), project_name="TestProject", uuid="test_uuid")
+        assert datastore._session.query(SQLCompositeMetric).count() == 100
+        for item in datastore._session.query(SQLCompositeMetric).all():
+            index = int(item.children[0].value)
+            assert item.children[1].value == compare[index].child2.grandchlid1
+            assert item.children[2].value == compare[index].child2.grandchild2
+            assert item.children[3].value == compare[index].child3
 
     def test_post(self, datastore: SQLMetricStore):
 

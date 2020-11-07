@@ -1,27 +1,50 @@
+"""
+SQL implementation of `MetricStore` class
+"""
+
 import datetime
 import hashlib
 import logging
-from collections import OrderedDict
-from typing import Union, List, Optional, Tuple
-
 import sqlalchemy
-from sqlalchemy import Column, Integer, String, Text, TIMESTAMP, ForeignKey, Table, Float, desc, UniqueConstraint, insert, \
-    exists
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import relationship, sessionmaker
 
+from collections import OrderedDict
 from daktylos.data import MetricStore, Metadata, Metric, CompositeMetric
-
+from sqlalchemy import (
+    Column,
+    desc,
+    exists,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    TIMESTAMP,
+    Table,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import (
+    relationship,
+    sessionmaker,
+)
+from sqlalchemy.ext.declarative import declarative_base
+from typing import (
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 __all__ = ['SQLMetricStore']
 
 Base = declarative_base()
 Session = sessionmaker()
-log = logging.getLogger("sql data store")
+log = logging.getLogger("SQLMetricStore")
 log.setLevel(logging.WARNING)
 
 
 class SQLMetadata(Base):
-
+    """
+    Metadata class representing SQL table for same
+    """
     __tablename__ = "metrics_metadata"
 
     id = Column(Integer, primary_key=True)
@@ -30,7 +53,7 @@ class SQLMetadata(Base):
     value = Column(Text)
     __table_args__ = (UniqueConstraint('name', 'value', name='unique1'),)
 
-
+# association between metrics and metadata tables
 SQLMetadataAssociationTable = Table(
     "metadata_associations", Base.metadata,
     Column("metadata_set_id", Integer, ForeignKey('metadata_sets.uuid')),
@@ -39,13 +62,18 @@ SQLMetadataAssociationTable = Table(
 
 
 class SQLMetadataSet(Base):
+    """
+    Class representing SQL metadata-set table
+    """
     __tablename__ = "metadata_sets"
     uuid = Column(String, primary_key=True)
     data = relationship("SQLMetadata", secondary=SQLMetadataAssociationTable, cascade="all, delete")
 
 
 class SQLMetric(Base):
-
+    """
+    Class representing SQL table of key/value metric pairs
+    """
     __tablename__ = "metric_values"
 
     id = Column(Integer, primary_key=True)
@@ -55,7 +83,9 @@ class SQLMetric(Base):
 
 
 class SQLCompositeMetric(Base):
-
+    """
+    Class represneting SQL table for composite metric sets
+    """
     __tablename__ = 'composite_metrics'
 
     id = Column(Integer, primary_key=True)
@@ -73,6 +103,8 @@ class SQLMetricStore(MetricStore):
     Concrete data store class for metrics storage and retrieval, based on SQL and SqlAlchemy
 
     :param engine: The *sqlalchemy* engine to use, as a uri
+    :param create: whether to create tables if the do not exist in SQL database
+    :param metadata: optional set of common metadata to be applied to composite metrics or None.
     """
     singleton = None
 
@@ -130,7 +162,7 @@ class SQLMetricStore(MetricStore):
                 raise ValueError(f"Invalid operations: {op}")
         return statement
 
-    def _post_metadata(self, metadata_set: Metadata):
+    def _post_metadata(self, metadata_set: Metadata) -> SQLMetadataSet:
 
         m = hashlib.sha256()
         for name, value in metadata_set.values.items():
@@ -148,7 +180,6 @@ class SQLMetricStore(MetricStore):
             if type(value) not in [str, int, float]:
                 raise ValueError(f"Invalid type for metadata named {name} with type {type(value).__name__}")
             type_enum = {str: Metadata.Types.STRING,
-                         float: Metadata.Types.FLOAT,
                          int: Metadata.Types.INTEGER}[type(value)]
             if (name, value) not in existing_name_values:
                 metadata = SQLMetadata(name=name, value=str(value), typ=type_enum)
@@ -198,17 +229,29 @@ class SQLMetricStore(MetricStore):
         self._purge_orphaned_metadatsets()
         self._session.commit()
 
-    def post(self, metric: Union[Metric, CompositeMetric], timestamp: datetime.datetime = datetime.datetime.utcnow(),
-             project_name: Optional[str] = None, uuid: Optional[str] = None):
+    def post(self,
+             metric: Union[Metric, CompositeMetric],
+             timestamp: datetime.datetime = datetime.datetime.utcnow(),
+             metadata: Optional[Metadata] = None,
+             project_name: Optional[str] = None,
+             uuid: Optional[str] = None):
         if not self._session:
             raise RuntimeError("Not in context of data store.  please use 'with' statement")
+        metadata_set: Optional[SQLMetadataSet] = None
+        if metadata:
+            metadata_set = self._post_metadata(metadata)
         key_values = metric.flatten()
         metrics = []
         for key, value in key_values.items():
             metrics.append(SQLMetric(name=key, value=str(value)))
-        metric_item = SQLCompositeMetric(name=metric.name, children=metrics, timestamp=timestamp,
-                                         metrics_metadata=self._sqlmetadata,
-                                         metrics_metadata_id=self._sqlmetadata.uuid if self._metadata else None)
+        metric_item = SQLCompositeMetric(name=metric.name,
+                                         children=metrics,
+                                         timestamp=timestamp,
+                                         project=project_name,
+                                         uuid=uuid,
+                                         metrics_metadata=metadata or self._sqlmetadata,
+                                         metrics_metadata_id=metadata_set.uuid if metadata_set else
+                                         self._sqlmetadata.uuid if self._sqlmetadata else None)
         self._session.add(metric_item)
 
     def metrics_by_date(self, metric_name: str, oldest: datetime.datetime,

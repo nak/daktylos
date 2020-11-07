@@ -47,25 +47,28 @@ class TestRulesEngine:
         resources_path = os.path.join(os.path.dirname(__file__), "resources")
         rules_path = Path(os.path.join(resources_path, "test_rules.yaml"))
         rules_engine = RulesEngine.from_yaml_file(rules_path)
-        count = 0
+        alert_count = 0
+        failure_count = 0
         for failure in rules_engine.process("dummy_composite_metric_value"):
-            count += 1
-            if count == 1:
-                assert failure.level == ValidationStatus.Level.ALERT
+            if failure.level == ValidationStatus.Level.ALERT:
+                alert_count += 1
                 assert list(failure.offending_metrics().keys()) == ['/Performance#overall_cpu']
                 assert failure.parent_metric == "dummy_composite_metric_value"
                 assert "'/Performance#overall_cpu < 70.0" in failure.text
                 assert "ALERT" in failure.text
                 assert "second_alert_performance" in failure.text
-            elif count == 2:
-                assert failure.level == ValidationStatus.Level.FAILURE
+            elif failure.level == ValidationStatus.Level.FAILURE:
+                failure_count += 1
                 assert list(failure.offending_metrics().keys()) == ['/CodeCoverage#overall']
                 assert failure.parent_metric == "dummy_composite_metric_value"
                 assert "/CodeCoverage#overall >= 85.0" in failure.text
                 assert "VALIDATION FAILURE" in failure.text
                 assert "failure_validation_codecov" in failure.text
+            else:
+                assert False, f"Unexpected failure level {failure.level}"
+        assert alert_count == 1
+        assert failure_count == 1
         assert len(validations) == 8
-        assert count == 2
 
     def test_from_yaml_file(self):
         resources_path = os.path.join(os.path.dirname(__file__), "resources")
