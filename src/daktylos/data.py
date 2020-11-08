@@ -85,8 +85,10 @@ except ImportError:
 __all__ = ["Metadata", "Metric", "CompositeMetric", "MetricStore", "MetricDataClass"]
 
 number = Union[float, int]
-metric_data_field = Union[number, "MetricDataClass", Dict[str, number], Dict[str, "MetricDataClass"],
-Optional[number], Optional["MetricDataClass"], Optional[Dict[str, number]], Optional[Dict[str, "MetricDataClass"]]
+metric_data_field = Union[
+    number, "MetricDataClass", Dict[str, number], Dict[str, "MetricDataClass"],
+    Optional[number], Optional["MetricDataClass"], Optional[Dict[str, number]],
+    Optional[Dict[str, "MetricDataClass"]]
 ]
 
 
@@ -587,19 +589,21 @@ class MetricStore(AbstractContextManager):
                   metric_name: str,
                   metric_data: MetricDataClass,
                   timestamp: datetime.datetime=datetime.datetime.utcnow(),
+                  metadata: Optional[Metadata] = None,
                   project_name: Optional[str] =None,
                   uuid: Optional[str] = None):
         """
         Post the given metric data (as a data class instance) to this data store
 
-        :param metric_data: the metric data (in a dataclass isntance) to post
+        :param metric_data: the metric data (in a dataclass instance) to post
         :param timestamp: the timestamp of the metric
+        :param metadata: optional metadata associated with metric
         :param project_name: if specified, the project name associated with the metric
         :param uuid: if specified, a unique id associated with the metric that can be used to
            correlate to other external data
         """
         metric = BasicMetric.from_dataclass(metric_name, metric_data)
-        self.post(metric, timestamp=timestamp, project_name=project_name, uuid=uuid)
+        self.post(metric, timestamp=timestamp, project_name=project_name, uuid=uuid, metadata=metadata)
         
     @abstractmethod
     def metrics_by_date(self, metric_name: str, oldest: datetime.datetime,

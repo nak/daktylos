@@ -108,7 +108,7 @@ class SQLMetricStore(MetricStore):
     """
     singleton = None
 
-    def __init__(self, engine, create: bool = False, metadata: Optional[Metadata] = None):
+    def __init__(self, engine, create: bool = False):
         if SQLMetricStore.singleton is not None:
             raise RuntimeError("Can only instantiate one instance of SQLMetricStore")
         SQLMetricStore.singleton = self
@@ -116,13 +116,11 @@ class SQLMetricStore(MetricStore):
             Base.metadata.create_all(engine)
         self._session = None
         self._engine = engine
-        self._metadata = metadata
         self._filters: OrderedDict[str, Tuple[MetricStore.Comparison, str]] = {}
 
     def __enter__(self):
         Session.configure(bind=self._engine)
         self._session = Session()
-        self._sqlmetadata = self._post_metadata(self._metadata) if self._metadata is not None else None
         return self
 
     def filter_on_metadata(self, name: str, value: Union[str, int, float],
@@ -168,8 +166,9 @@ class SQLMetricStore(MetricStore):
         for name, value in metadata_set.values.items():
             m.update(f"{name} : {value}".encode('utf-8'))
         uuid = m.digest()
-        if self._session.query(SQLMetadataSet).filter(SQLMetadataSet.uuid == uuid).scalar() is not None:
-            return
+        existing =  self._session.query(SQLMetadataSet).filter(SQLMetadataSet.uuid == uuid).scalar()
+        if existing is not None:
+            return existing
 
         names = list(metadata_set.values.keys())
         existing = self._session.query(SQLMetadata).filter(SQLMetadata.name.in_(names)).all()
@@ -249,9 +248,8 @@ class SQLMetricStore(MetricStore):
                                          timestamp=timestamp,
                                          project=project_name,
                                          uuid=uuid,
-                                         metrics_metadata=metadata or self._sqlmetadata,
-                                         metrics_metadata_id=metadata_set.uuid if metadata_set else
-                                         self._sqlmetadata.uuid if self._sqlmetadata else None)
+                                         metrics_metadata=metadata_set,
+                                         metrics_metadata_id=metadata_set.uuid if metadata_set.uuid else None)
         self._session.add(metric_item)
 
     def metrics_by_date(self, metric_name: str, oldest: datetime.datetime,

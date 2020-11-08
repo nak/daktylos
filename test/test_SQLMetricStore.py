@@ -6,6 +6,8 @@ import pytest
 from daktylos.data import CompositeMetric, Metric, Metadata, MetricDataClass
 from daktylos.data_stores.sql import SQLMetricStore, SQLCompositeMetric, SQLMetadataSet, SQLMetadata
 
+metadata = Metadata.system_info()
+
 
 class TestSQLMetricStore:
 
@@ -50,6 +52,7 @@ class TestSQLMetricStore:
         for item in data_generator():
             compare[item.child1] = item
             datastore.post_data("TestMetric", item,
+                                metadata=metadata,
                                 timestamp=datetime.datetime.utcnow(), project_name="TestProject", uuid="test_uuid")
         assert datastore._session.query(SQLCompositeMetric).count() == 100
         for item in datastore._session.query(SQLCompositeMetric).all():
@@ -85,7 +88,8 @@ class TestSQLMetricStore:
         compare = {}
         for item in data_generator():
             compare[int(item['#child1'].value)] = item
-            datastore.post(item, datetime.datetime.utcnow(), project_name="TestProject", uuid="test_uuid")
+            datastore.post(item, datetime.datetime.utcnow(), metadata=metadata,
+                           project_name="TestProject", uuid="test_uuid")
         assert datastore._session.query(SQLCompositeMetric).count() == 100
         for item in datastore._session.query(SQLCompositeMetric).all():
             index = int(item.children[0].value)
@@ -94,10 +98,11 @@ class TestSQLMetricStore:
             assert item.children[3].value == compare[index]['child3#grandchild3.1'].value
 
     def test_metrics_by_date(self, preloaded_datastore: SQLMetricStore):
+        timestamp = preloaded_datastore.base_timestamp
         assert preloaded_datastore.metrics_by_date(metric_name="TestMetric",
                                                    oldest=datetime.datetime.utcnow()) == []
 
-        oldest = datetime.datetime.utcnow() - datetime.timedelta(seconds=10)
+        oldest = timestamp - datetime.timedelta(seconds=10)
         items = preloaded_datastore.metrics_by_date(metric_name="TestMetric",
                                                     oldest=oldest)
         all_items = preloaded_datastore.metrics_by_date(metric_name="TestMetric",
@@ -143,8 +148,9 @@ class TestSQLMetricStore:
 
     def test_metrics_by_date_with_filter(self, preloaded_datastore: SQLMetricStore):
         system_info = Metadata.system_info()
+        timestamp = preloaded_datastore.base_timestamp
         preloaded_datastore.filter_on_metadata(name="platform", value=system_info.values["platform"])
-        oldest = datetime.datetime.utcnow() - datetime.timedelta(seconds=10)
+        oldest = timestamp - datetime.timedelta(seconds=10)
         items = preloaded_datastore.metrics_by_date(metric_name="TestMetric",
                                                     oldest=oldest)
         all_items = preloaded_datastore.metrics_by_date(metric_name="TestMetric",

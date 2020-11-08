@@ -39,8 +39,7 @@ def engine():
 
 @pytest.fixture(scope='function')
 def datastore(engine):
-    metatdata = Metadata.system_info()
-    with SQLMetricStore(engine=engine, create=True, metadata=metatdata) as store:
+    with SQLMetricStore(engine=engine, create=True) as store:
         try:
             yield store
         finally:
@@ -53,14 +52,17 @@ def datastore(engine):
 
 @pytest.fixture(scope='function')
 def preloaded_datastore(engine):
-    metatdata = Metadata.system_info()
-    with SQLMetricStore(engine=engine, create=True, metadata=metatdata) as datastore:
+    metadata = Metadata.system_info()
+    timestamp = datetime.datetime.utcnow()
+    with SQLMetricStore(engine=engine, create=True) as datastore:
         try:
             index = 0
             for metric in data_generator():
-                datastore.post(metric, datetime.datetime.utcnow() - datetime.timedelta(seconds=index))
+                datastore.post(metric, timestamp - datetime.timedelta(seconds=index),
+                               metadata=metadata)
                 index += 1
             assert datastore._session.query(SQLCompositeMetric).count() == 100
+            datastore.base_timestamp = timestamp
             yield datastore
         finally:
             datastore._session.query(SQLCompositeMetric).delete()
