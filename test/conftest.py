@@ -19,11 +19,11 @@ def data_generator():
         top.add(child1)
         top.add(child2)
         top.add(child3)
-        grandchild2_1 = Metric("grandchild2.1", seed[1])
-        grandchild2_2 = Metric("grandchild2.2", seed[2])
+        grandchild2_1 = Metric("grandchild1", seed[1])
+        grandchild2_2 = Metric("grandchild2", seed[2])
         child2.add(grandchild2_1)
         child2.add(grandchild2_2)
-        grandchild3_1 = Metric("grandchild3.1", seed[3])
+        grandchild3_1 = Metric("grandchild1", seed[3])
         child3.add(grandchild3_1)
         yield top
         seed[0] += 1
@@ -32,7 +32,7 @@ def data_generator():
         seed[3] -= 2
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope='function')
 def engine():
     return sqlalchemy.create_engine("sqlite:///:memory:")
 

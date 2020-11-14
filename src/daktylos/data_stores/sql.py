@@ -31,7 +31,7 @@ from typing import (
     List,
     Optional,
     Tuple,
-    Union,
+    Union, Dict,
 )
 __all__ = ['SQLMetricStore']
 
@@ -84,7 +84,7 @@ class SQLMetric(Base):
 
 class SQLCompositeMetric(Base):
     """
-    Class represneting SQL table for composite metric sets
+    Class representing SQL table for composite metric sets
     """
     __tablename__ = 'composite_metrics'
 
@@ -106,6 +106,7 @@ class SQLMetricStore(MetricStore):
     :param create: whether to create tables if the do not exist in SQL database
     :param metadata: optional set of common metadata to be applied to composite metrics or None.
     """
+
     singleton = None
 
     def __init__(self, engine, create: bool = False):
@@ -123,42 +124,76 @@ class SQLMetricStore(MetricStore):
         self._session = Session()
         return self
 
-    def filter_on_metadata(self, name: str, value: Union[str, int, float],
-                           operation: "MetricStore.Comparison" = MetricStore.Comparison.EQUAL) -> "MetricStore":
-        if name in self._filters and operation in self._filters[name]:
-            raise ValueError(f"Filter on {name} with operation {operation} already exists")
-        self._filters[name] = (operation, value)
+    class Query(MetricStore.Query):
+        
+        def __init__(self, store: "SQLMetricStore", metric_name: str, max_count: Optional[int] = None):
+            super().__init__(metric_name=metric_name, count=max_count)
+            self._session = store._session
+            self._statement = self._session.query(SQLCompositeMetric).filter(SQLCompositeMetric.name == metric_name)
+            self._joined = False
+            self._max_count = max_count
 
-    def clear_filter(self, name: Optional[str] = None):
-        if name is None:
-            self._filters = []
-        else:
-            if name in self._filters:
-                del self._filters[name]
+        def filter_on_date(self, oldest: datetime.datetime, newest: datetime.datetime) -> "MetricStore.Query":
+            self._statement = self._statement.filter(
+                SQLCompositeMetric.timestamp >= oldest,
+                SQLCompositeMetric.timestamp <= newest
+            )
 
-    def _apply_filters(self, statement):
-        for name, (op, value) in self._filters.items():
+        def filter_on_metadata(self, **kwds) -> "MetricStore.Query":
+            for name, value in kwds.items():
+                if not self._joined:
+                    self._statement = self._statement.join(SQLCompositeMetric.metrics_metadata).join(
+                        SQLMetadataSet.data)
+                    self._joined = True
+                self._statement = self._statement.filter(SQLMetadata.name == name, SQLMetadata.value == value)
+            return self
+        
+        def filter_on_metadata_field(self, name: str, value: int, op: MetricStore.Comparison):
+            if not self._joined:
+                self._statement = self._statement.join(SQLCompositeMetric.metrics_metadata).join(SQLMetadataSet.data)
+                self._joined = True
             if op == MetricStore.Comparison.EQUAL:
-                statement = statement.filter(SQLMetadata.name == name,
+                self._statement = self._statement.filter(SQLMetadata.name == name,
                                 SQLMetadata.value == value)
             elif op == MetricStore.Comparison.NOT_EQUAL:
-                statement = statement.filter(SQLMetadata.name == name,
+                self._statement = self._statement.filter(SQLMetadata.name == name,
                                 SQLMetadata.value != value)
             elif op == MetricStore.Comparison.LESS_THAN:
-                statement = statement.filter(SQLMetadata.name == name,
+                self._statement = self._statement.filter(SQLMetadata.name == name,
                                 SQLMetadata.value < value)
             elif op == MetricStore.Comparison.GREATER_THAN:
-                statement = statement.filter(SQLMetadata.name == name,
+                self._statement = self._statement.filter(SQLMetadata.name == name,
                                 SQLMetadata.value > value)
             elif op == MetricStore.Comparison.LESS_THAN_OR_EQUAL:
-                statement = statement.filter(SQLMetadata.name == name,
+                self._statement = self._statement.filter(SQLMetadata.name == name,
                                 SQLMetadata.value <= value)
             elif op == MetricStore.Comparison.GREATER_THAN_OR_EQUAL:
-                statement = statement.filter(SQLMetadata.name == name,
+                self._statement = self._statement.filter(SQLMetadata.name == name,
                                 SQLMetadata.value >= value)
             else:
                 raise ValueError(f"Invalid operations: {op}")
-        return statement
+            return self
+        
+        def execute(self) -> MetricStore.QueryResult:
+            # we order timestamps for query in descending order to filter out "the top" which are the newest items
+            self._statement = self._statement.order_by(desc(SQLCompositeMetric.timestamp))
+            if self._max_count:
+                self._statement = self._statement.limit(self._max_count)
+            sql_result: List[SQLCompositeMetric] = self._statement.all()
+            result: MetricStore.QueryResult[Union[CompositeMetric, Metric]] = MetricStore.QueryResult()
+            for item in reversed(sql_result):  # order timestamps from oldest to newest when returning to client
+                flattened: Dict[str, float] = {}
+                for child in item.children:
+                    flattened[child.name] = child.value
+                metadata = Metadata({data.name: data.value for data in item.metrics_metadata.data})
+                result.metadata.append(metadata)
+                result.timestamps.append(item.timestamp)
+                result.metric_data.append(CompositeMetric.from_flattened(flattened))
+            return result
+
+    def start_query(self, metric_name: str, max_results: Optional[int] = None) -> Query:
+        query = SQLMetricStore.Query(store=self, metric_name=metric_name, max_count=max_results)
+        return query
 
     def _post_metadata(self, metadata_set: Metadata) -> SQLMetadataSet:
 
@@ -196,16 +231,15 @@ class SQLMetricStore(MetricStore):
     def purge_by_date(self, before: datetime.datetime, name: Optional[str] = None):
         if not self._session:
             raise RuntimeError("Not in context of data store.  please use 'with' statement")
-        stmnt = self._session.query(SQLCompositeMetric)
+        statement = self._session.query(SQLCompositeMetric)
         if self._filters:
-            stmnt.join(SQLCompositeMetric.metrics_metadata_id).join(SQLMetadata.parent_id)
+            statement.join(SQLCompositeMetric.metrics_metadata_id).join(SQLMetadata.parent_id)
         if name is None:
-            stmnt.filter(SQLCompositeMetric.timestamp < before)
+            statement.filter(SQLCompositeMetric.timestamp < before)
         else:
-            stmnt =self._session.query(SQLCompositeMetric).filter(SQLCompositeMetric.timestamp < before,
+            statement =self._session.query(SQLCompositeMetric).filter(SQLCompositeMetric.timestamp < before,
                                                            SQLCompositeMetric.name == name)
-        stmnt = self._apply_filters(stmnt)
-        stmnt.delete()
+        statement.delete()
         self._purge_orphaned_metadatsets()
         self._session.commit()
 
@@ -217,23 +251,23 @@ class SQLMetricStore(MetricStore):
                 order_by(SQLCompositeMetric.timestamp).limit(count).all()[-1]
         except IndexError:
             return
-        stmnt = self._session.query(SQLCompositeMetric)
+        statement = self._session.query(SQLCompositeMetric)
         if self._filters:
-            stmnt = stmnt.join(SQLCompositeMetric.metrics_metadata_id)#.join(SQLMetadata.parent_id)
-        stmnt = stmnt.filter(SQLCompositeMetric.name == name,
+            statement = statement.join(SQLCompositeMetric.metrics_metadata_id)#.join(SQLMetadata.parent_id)
+        statement = statement.filter(SQLCompositeMetric.name == name,
                              SQLCompositeMetric.timestamp <= purge_date[0])
-        stmnt = self._apply_filters(stmnt)
-        stmnt.delete()
-        self._session.execute(stmnt)
+        statement.delete()
+        self._session.execute(statement)
         self._purge_orphaned_metadatsets()
         self._session.commit()
 
     def post(self,
              metric: Union[Metric, CompositeMetric],
-             timestamp: datetime.datetime = datetime.datetime.utcnow(),
+             timestamp: Optional[datetime.datetime] = None,
              metadata: Optional[Metadata] = None,
              project_name: Optional[str] = None,
              uuid: Optional[str] = None):
+        timestamp = timestamp or datetime.datetime.utcnow()
         if not self._session:
             raise RuntimeError("Not in context of data store.  please use 'with' statement")
         metadata_set: Optional[SQLMetadataSet] = None
@@ -251,43 +285,6 @@ class SQLMetricStore(MetricStore):
                                          metrics_metadata=metadata_set,
                                          metrics_metadata_id=metadata_set.uuid if metadata_set.uuid else None)
         self._session.add(metric_item)
-
-    def metrics_by_date(self, metric_name: str, oldest: datetime.datetime,
-                        newest: datetime.datetime = datetime.datetime.utcnow()) -> Union[
-        List[CompositeMetric], List[Metric]]:
-        if not self._session:
-            raise RuntimeError("Not in context of data store.  please use 'with' statement")
-        stmnt = self._session.query(SQLCompositeMetric)
-        if self._filters:
-            stmnt.join(SQLCompositeMetric.metrics_metadata).join(SQLMetadataSet.data)
-        stmnt = stmnt.filter(
-            SQLCompositeMetric.name == metric_name,
-            SQLCompositeMetric.timestamp >= oldest
-        )
-        stmnt = self._apply_filters(stmnt)
-        result = stmnt.order_by(desc(SQLCompositeMetric.timestamp)).all()
-        return result
-
-    def metrics_by_volume(self, metric_name: str, count: int) -> Union[
-        List[SQLCompositeMetric], List[SQLMetric]]:
-        """
-        Get a set of at most *count* most recent metrics
-
-        :param metric_name: name of metric
-        :param count: maximum number of items to fetch
-        :return: list of requested [composite] metrics
-        """
-        if not self._session:
-            raise RuntimeError("Not in context of data store.  please use 'with' statement")
-        stmnt = self._session.query(SQLCompositeMetric)
-        if self._filters:
-            stmnt.join(SQLCompositeMetric.metrics_metadata).join(SQLMetadataSet.data)
-        stmnt.filter(
-            SQLCompositeMetric.name == metric_name,
-        )
-        stmnt = self._apply_filters(stmnt)
-        result = stmnt.order_by(desc(SQLCompositeMetric.timestamp)).limit(count).all()
-        return result
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:

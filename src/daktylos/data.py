@@ -74,9 +74,9 @@ import platform
 import socket
 from abc import abstractmethod, ABC
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import (List, Dict, Optional, Iterable, Union, Set, TypeVar, Type)
+from typing import (List, Dict, Optional, Iterable, Union, Set, TypeVar, Type, Tuple, Generic)
 try:
     from typing import Protocol
 except ImportError:
@@ -90,6 +90,7 @@ metric_data_field = Union[
     Optional[number], Optional["MetricDataClass"], Optional[Dict[str, number]],
     Optional[Dict[str, "MetricDataClass"]]
 ]
+MDC = TypeVar('MDC')
 
 
 class MetricDataClass(Protocol):
@@ -538,6 +539,72 @@ class MetricStore(AbstractContextManager):
     from a data store
     """
 
+    class Comparison(Enum):
+        EQUAL = "=="
+        NOT_EQUAL = "<>"
+        LESS_THAN = "<"
+        GREATER_THAN = ">"
+        LESS_THAN_OR_EQUAL = "<="
+        GREATER_THAN_OR_EQUAL = ">="
+
+    @dataclass
+    class QueryResult(Generic[MDC]):
+        metadata : List[Optional[Metadata]] = field(default_factory=list)
+        timestamps: List[datetime.datetime] = field(default_factory=list)
+        metric_data: List[MDC] = field(default_factory=list)
+
+    class Query:
+
+        def __init__(self, metric_name: str, count: Optional[int] = None):
+            self._metric_name = metric_name
+            self._count = count
+
+        @property
+        def count(self) -> Optional[int]:
+            return self._count
+
+        def set_max_count(self, count: int) -> "MetricStore.Query":
+            """
+            :param count: max number of results to return
+            :return: self
+            """
+            self._count = count
+            return self
+
+        @abstractmethod
+        def filter_on_date(self, oldest: datetime.datetime, newest: datetime.datetime) -> "MetricStore.Query":
+            """
+            Filter results on date range
+            :param oldest: oldest date
+            :param newest: newest date
+            :return: self
+            """
+
+        @abstractmethod
+        def filter_on_metadata(self, **kwds) -> "MetricStore.Query":
+            """
+            filter on metadata fields matching given keyword/value pairs
+            :param kwds: keywords and values to filter on
+            :return:  self
+            """
+
+        @abstractmethod
+        def filter_on_metadata_field(self, name: str, value: int, op: "MetricStore.Comparison") -> "MetricStore.Query":
+            """
+            filter query on metadata field with given name against provided value
+            :param name: name of metadata field
+            :param value: value to compare against
+            :param op: type of comparison operation to perform
+            :return: self
+            """
+
+        @abstractmethod
+        def execute(self) -> "MetricStore.QueryResult":
+            """
+            Execute the query
+            :return: list of BaseMetric results
+            """
+
     @abstractmethod
     def __enter__(self) -> "MetricStore":
         """
@@ -570,7 +637,7 @@ class MetricStore(AbstractContextManager):
         """
         
     @abstractmethod
-    def post(self, metric: CompositeMetric, timestamp: datetime.datetime = datetime.datetime.utcnow(),
+    def post(self, metric: CompositeMetric, timestamp: Optional[datetime.datetime] = None,
              metadata: Optional[Metadata] = None,
              project_name: Optional[str] = None,
              uuid: Optional[str] = None):
@@ -588,7 +655,7 @@ class MetricStore(AbstractContextManager):
     def post_data(self,
                   metric_name: str,
                   metric_data: MetricDataClass,
-                  timestamp: datetime.datetime=datetime.datetime.utcnow(),
+                  timestamp: Optional[datetime.datetime] = None,
                   metadata: Optional[Metadata] = None,
                   project_name: Optional[str] =None,
                   uuid: Optional[str] = None):
@@ -604,57 +671,83 @@ class MetricStore(AbstractContextManager):
         """
         metric = BasicMetric.from_dataclass(metric_name, metric_data)
         self.post(metric, timestamp=timestamp, project_name=project_name, uuid=uuid, metadata=metadata)
-        
+
     @abstractmethod
+    def start_query(self, metric_name: str, max_results: Optional[int] = None) -> Query:
+        """
+        :param metric_name: name of metric to query for
+        :param max_results: optional max number of results to return
+        :return: a Query object used to construct a query and execute it
+        """
+
     def metrics_by_date(self, metric_name: str, oldest: datetime.datetime,
-                        newest: datetime.datetime = datetime.datetime.utcnow())\
-            -> Union[List[CompositeMetric], List[Metric]]:
-        """        
+                        newest: Optional[datetime.datetime] = None,
+                        metadata_filter: Optional[Dict[str, str]] = None) -> "QueryResult":
+        """
         :param metric_name: name of metric to retrieve
         :param oldest: only retrieve values after this date
         :param newest: only retrieve values before this data, or up until the most recent if unspecified
+        :param metadata_filter: filter on key/value pairs that match associated metadata of the metrics (optional)
         :return: the set of CompositeMetric or Metric values associated with name over a range of dates,
             sorted by date from newest to oldest
         """
-        
-    @abstractmethod
-    def metrics_by_volume(self, metric_name: str, count: int) -> Union[List[CompositeMetric], List[Metric]]:
+        newest = newest or datetime.datetime.utcnow()
+        query = self.start_query(metric_name)
+        query.filter_on_date(oldest=oldest, newest=newest)
+        if metadata_filter:
+            query.filter_on_metadata(**metadata_filter)
+        return query.execute()
+
+    def metrics_by_volume(self, metric_name: str, count: int,
+                          metadata_filter: Optional[Dict[str, str]] = None) -> "QueryResult[Union[CompositeMetric, Metric]]":
         """
         :param metric_name: name of metric to retrieve
         :param count: max number of metric values to return
+        :param metadata_filter: filter on key/value pairs that match associated metadata of the metrics (optional)
+
         :return: at most count more recent values of metric with given name, sorted by date from newest to oldest
         """
+        query = self.start_query(metric_name, count)
+        if metadata_filter:
+            query.filter_on_metadata(**metadata_filter)
+        return query.execute()
 
-    def metric_data_by_date(self, name: str, typ: T,  oldest: datetime.datetime,
-                            newest: datetime.datetime = datetime.datetime.utcnow()) -> List[T]:
-        items = self.metrics_by_date(name, oldet=oldest, newest=newest)
-        return [metric.to_dataclass(typ) for metric in items]
+    def metrics_data_by_date(self, name: str, typ: T,  oldest: datetime.datetime,
+                             newest: Optional[datetime.datetime] = None,
+                             metadata_filter: Optional[Dict[str, str]] = None) -> "QueryResult[T]":
+        """
+        query metric data by dataclass-style metric definition
+        :param name: name of metric to query
+        :param typ: dataclass type to store metrics values
+        :param oldest: earliest date to search for
+        :param newest: newest date to earch for, or undpsecified for all most recent
+        :param metadata_filter: filter on optional metadata
 
-    def metric_data_by_volume(self, name: str, typ: T, count: int) -> List[T]:
-        items = self.metrics_by_volume(name, count=count)
-        return [metric.to_dataclass(typ) for metric in items]
+        :return: results of query, ordered by timestamp
+        """
+        newest = newest or datetime.datetime.utcnow()
+        items = self.metrics_by_date(metric_name=name, oldest=oldest, newest=newest, metadata_filter=metadata_filter)
+        items.metric_data = [metric.to_dataclass(typ) for metric in items.metric_data]
+        return items
+
+    def metrics_data_by_volume(self, name: str, typ: T, count: int,
+                               metadata_filter: Optional[Dict[str, str]] = None) -> "QueryResult[T]":
+        """
+        Return results of query stored in dataclass-style for given dataclass type T
+        :param name: name of metric
+        :param typ: dataclass used to store resulting data
+        :param count: max count to return (most recent)
+
+        :return: QueryResult instance based on given dataclass type, ordered by timestamp
+        """
+        result = self.metrics_by_volume(name, count=count, metadata_filter=metadata_filter)
+        # transform CompositeMetric items to given dataclass type T
+        result.metric_data = [metric.to_dataclass(typ) for metric in result.metric_data]
+        return result
 
     @abstractmethod
-    def commit(self):
+    def commit(self) -> None:
         """
         Explicit commit of all buffered changes
         """
 
-    class Comparison(Enum):
-        EQUAL = "=="
-        NOT_EQUAL = "<>"
-        LESS_THAN = "<"
-        GREATER_THAN = ">"
-        LESS_THAN_OR_EQUAL = "<="
-        GREATER_THAN_OR_EQUAL = ">="
-
-    @abstractmethod
-    def filter_on_metadata(self, name: str, value: Union[str, int],
-                           operation: "MetricStore.Comparison" = Comparison.EQUAL) -> "MetricStore":
-        """
-        Filter data on a specific metadata value
-        :param name:  which metadata
-        :param value: value to compare to
-        :param operation: type of comparison to make
-        :return: self
-        """
