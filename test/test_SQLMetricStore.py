@@ -113,13 +113,13 @@ class TestSQLMetricStore:
 
     def test_metrics_by_date(self, preloaded_datastore: SQLMetricStore):
         timestamp = preloaded_datastore.base_timestamp
-        assert preloaded_datastore.metrics_by_date(metric_name="TestMetric",
-                                                   oldest=datetime.datetime.utcnow()).metric_data == []
+        assert preloaded_datastore.composite_metrics_by_date(metric_name="TestMetric",
+                                                             oldest=datetime.datetime.utcnow()).metric_data == []
 
         oldest = timestamp - datetime.timedelta(seconds=10)
-        items = preloaded_datastore.metrics_by_date(metric_name="TestMetric", oldest=oldest)
-        all_items = preloaded_datastore.metrics_by_date(metric_name="TestMetric",
-                                                        oldest=oldest - datetime.timedelta(days=100))
+        items = preloaded_datastore.composite_metrics_by_date(metric_name="TestMetric", oldest=oldest)
+        all_items = preloaded_datastore.composite_metrics_by_date(metric_name="TestMetric",
+                                                                  oldest=oldest - datetime.timedelta(days=100))
         assert len(items.metric_data) > 0
         metadata = items.metadata[0]
         assert len(items.metadata) == len(items.metric_data) == len(items.timestamps)
@@ -130,8 +130,8 @@ class TestSQLMetricStore:
             assert oldest - datetime.timedelta(days=100) <= timestamp <= preloaded_datastore.base_timestamp
 
     def test_metrics_by_volume(self, preloaded_datastore: SQLMetricStore):
-        items = preloaded_datastore.metrics_by_volume(metric_name="TestMetric", count=5)
-        all_items = preloaded_datastore.metrics_by_volume(metric_name="TestMetric", count=200)
+        items = preloaded_datastore.composite_metrics_by_volume(metric_name="TestMetric", count=5)
+        all_items = preloaded_datastore.composite_metrics_by_volume(metric_name="TestMetric", count=200)
         assert len(items.metric_data) == 5
         assert len(all_items.metric_data) == 100  # there are only 100 items in preloaded datastore
         assert len(items.metric_data) == len(items.metadata) == len(items.timestamps)
@@ -144,12 +144,12 @@ class TestSQLMetricStore:
 
     def test_metrics_by_volume_with_filter(self, preloaded_datastore: SQLMetricStore):
         system_info = Metadata.system_info()
-        items = preloaded_datastore.metrics_by_volume(metric_name="TestMetric", count=5)
+        items = preloaded_datastore.composite_metrics_by_volume(metric_name="TestMetric", count=5)
         for metadata in items.metadata:
             assert metadata.values['platform'] == system_info.values['platform']
-        items = preloaded_datastore.metrics_by_volume(metric_name="TestMetric", count=5,
-                                                      metadata_filter={'platform': system_info.values['platform']})
-        all_items = preloaded_datastore.metrics_by_volume(metric_name="TestMetric", count=200)
+        items = preloaded_datastore.composite_metrics_by_volume(metric_name="TestMetric", count=5,
+                                                                metadata_filter={'platform': system_info.values['platform']})
+        all_items = preloaded_datastore.composite_metrics_by_volume(metric_name="TestMetric", count=200)
         assert len(all_items.metric_data) == 100
         assert len(items.metadata) == 5
         sorted_items = all_items.metric_data[-5:]
@@ -157,20 +157,20 @@ class TestSQLMetricStore:
             assert item in sorted_items
         for index in range(1, len(items.timestamps)):
             assert items.timestamps[index-1] < items.timestamps[index]
-        items = preloaded_datastore.metrics_by_volume(metric_name="TestMetric", count=5,
-                                                      metadata_filter={'platform': 'fail'})
+        items = preloaded_datastore.composite_metrics_by_volume(metric_name="TestMetric", count=5,
+                                                                metadata_filter={'platform': 'fail'})
         assert items.timestamps == items.metric_data == items.metadata == []
 
     def test_metrics_by_date_with_filter(self, preloaded_datastore: SQLMetricStore):
         system_info = Metadata.system_info()
         timestamp = preloaded_datastore.base_timestamp
         oldest = timestamp - datetime.timedelta(seconds=10)
-        items = preloaded_datastore.metrics_data_by_date(name="TestMetric",
-                                                         typ=TestMetricData,
-                                                         oldest=oldest,
-                                                         metadata_filter={'platform': system_info.values['platform']})
-        all_items = preloaded_datastore.metrics_data_by_date(name="TestMetric", typ=TestMetricData,
-                                                             oldest=oldest - datetime.timedelta(days=100))
+        items = preloaded_datastore.dataclass_metrics_by_date(name="TestMetric",
+                                                              typ=TestMetricData,
+                                                              oldest=oldest,
+                                                              metadata_filter={'platform': system_info.values['platform']})
+        all_items = preloaded_datastore.dataclass_metrics_by_date(name="TestMetric", typ=TestMetricData,
+                                                                  oldest=oldest - datetime.timedelta(days=100))
         assert len(items.metric_data) > 0
         assert len(all_items.timestamps) == 100
         sorted_items = all_items.metric_data[-len(items.metric_data):]
@@ -178,23 +178,24 @@ class TestSQLMetricStore:
             assert item in sorted_items
         for index in range(1, len(all_items.timestamps)):
             assert all_items.timestamps[index-1] < all_items.timestamps[index]
-        items = preloaded_datastore.metrics_data_by_date(name="TestMetric",
-                                                         typ=TestMetricData,
-                                                         oldest=oldest,
-                                                         metadata_filter={'platform': 'fail'})
+        items = preloaded_datastore.dataclass_metrics_by_date(name="TestMetric",
+                                                              typ=TestMetricData,
+                                                              oldest=oldest,
+                                                              metadata_filter={'platform': 'fail'})
         assert items.timestamps == items.metric_data == items.metadata == []
 
     def test_metrics_data_by_date_with_filter(self, preloaded_datastore: SQLMetricStore):
         system_info = Metadata.system_info()
         timestamp = preloaded_datastore.base_timestamp
         oldest = timestamp - datetime.timedelta(seconds=10)
-        items = preloaded_datastore.metrics_data_by_date(name="TestMetric",
-                                                         typ=TestMetricData,
-                                                         oldest=oldest,
-                                                         metadata_filter={'platform': system_info.values['platform']})
-        all_items = preloaded_datastore.metrics_data_by_date(name="TestMetric",
-                                                             typ=TestMetricData,
-                                                             oldest=oldest - datetime.timedelta(days=100))
+        items = preloaded_datastore.dataclass_metrics_by_date(name="TestMetric",
+                                                              typ=TestMetricData,
+                                                              oldest=oldest,
+                                                              metadata_filter={'platform': system_info.values['platform'],
+                                                                          'system': system_info.values['system']})
+        all_items = preloaded_datastore.dataclass_metrics_by_date(name="TestMetric",
+                                                                  typ=TestMetricData,
+                                                                  oldest=oldest - datetime.timedelta(days=100))
         assert len(items.metric_data) > 0
         assert len(all_items.timestamps) == 100
         sorted_items = all_items.metric_data[-len(items.metric_data):]
@@ -202,8 +203,99 @@ class TestSQLMetricStore:
             assert item in sorted_items
         for index in range(1, len(all_items.timestamps)):
             assert all_items.timestamps[index-1] < all_items.timestamps[index]
-        items = preloaded_datastore.metrics_data_by_date(name="TestMetric",
-                                                         typ=TestMetricData,
-                                                         oldest=oldest,
-                                                         metadata_filter={'platform': 'fail'})
+        items = preloaded_datastore.dataclass_metrics_by_date(name="TestMetric",
+                                                              typ=TestMetricData,
+                                                              oldest=oldest,
+                                                              metadata_filter={'platform': 'fail'})
         assert items.timestamps == items.metric_data == items.metadata == []
+
+    def test_metrics_fields_by_date(self, preloaded_datastore: SQLMetricStore):
+        timestamp = preloaded_datastore.base_timestamp
+        assert preloaded_datastore.metric_fields_by_date(metric_name="TestMetric",
+                                                         oldest=datetime.datetime.utcnow()).metric_data == {}
+
+        oldest = timestamp - datetime.timedelta(seconds=10)
+        items = preloaded_datastore.metric_fields_by_date(metric_name="TestMetric", oldest=oldest)
+        all_items = preloaded_datastore.metric_fields_by_date(metric_name="TestMetric",
+                                                              oldest=oldest - datetime.timedelta(days=100))
+        assert len(items.metric_data) > 0
+        metadata = items.metadata[0]
+        assert len(items.metadata) == len(items.metric_data[list(items.metric_data.keys())[0]]) == len(items.timestamps)
+        for index in range(len(items.metadata)):
+            assert items.timestamps[index] >= oldest
+            assert items.metadata[index] == metadata
+        for timestamp in all_items.timestamps:
+            assert oldest - datetime.timedelta(days=100) <= timestamp <= preloaded_datastore.base_timestamp
+
+    def test_metric_fields_by_volume(self, preloaded_datastore: SQLMetricStore):
+        items = preloaded_datastore.metric_fields_by_volume(metric_name="TestMetric", count=5)
+        all_items = preloaded_datastore.metric_fields_by_volume(metric_name="TestMetric", count=200)
+        items_key0 = list(items.metric_data.keys())[0]
+        all_items_key0 = list(all_items.metric_data.keys())[0]
+        assert len(items.metric_data[items_key0]) == 5
+        assert len(all_items.metric_data[all_items_key0]) == 100  # there are only 100 items in preloaded datastore
+        assert len(items.metric_data[items_key0]) == len(items.metadata) == len(items.timestamps)
+        assert len(all_items.metadata) == len(all_items.metric_data[all_items_key0]) == len(all_items.timestamps)
+        for key in all_items.metric_data.keys():
+            sorted_items = all_items.metric_data[key][-5:]
+            for index, item in enumerate(items.metric_data[key]):
+                assert item == sorted_items[index]
+        for index in range(1, len(all_items.timestamps)):
+            assert all_items.timestamps[index-1] < all_items.timestamps[index]
+
+    def test_metric_subfields_by_volume(self, preloaded_datastore: SQLMetricStore):
+        system_info = Metadata.system_info()
+        items = preloaded_datastore.metric_fields_by_volume(metric_name="TestMetric", count=5, fields=['%grandchild%'],
+                                                            metadata_filter={'platform': system_info.values['platform']})
+        for key in items.metric_data.keys():
+            assert 'grandchild' in key
+        items_key0 = list(items.metric_data.keys())[0]
+        assert len(items.metric_data[items_key0]) == 5
+        assert len(items.metric_data[items_key0]) == len(items.metadata) == len(items.timestamps)
+        for index in range(1, len(items.timestamps)):
+            assert items.timestamps[index-1] < items.timestamps[index]
+
+    def test_metric_fields_by_volume_with_filter(self, preloaded_datastore: SQLMetricStore):
+        system_info = Metadata.system_info()
+        items = preloaded_datastore.metric_fields_by_volume(metric_name="TestMetric", count=5)
+        for metadata in items.metadata:
+            assert metadata.values['platform'] == system_info.values['platform']
+        items = preloaded_datastore.metric_fields_by_volume(metric_name="TestMetric", count=5,
+                                                            metadata_filter={'platform': system_info.values['platform']})
+        all_items = preloaded_datastore.metric_fields_by_volume(metric_name="TestMetric", count=200)
+        all_items_key0 = list(all_items.metric_data.keys())[0]
+        assert len(all_items.metric_data[all_items_key0]) == 100
+        assert len(items.metadata) == 5
+        sorted_items = all_items.metric_data[all_items_key0][-5:]
+        for index, item in enumerate(items.metric_data[all_items_key0]):
+            assert item in sorted_items
+        for index in range(1, len(items.timestamps)):
+            assert items.timestamps[index-1] < items.timestamps[index]
+        items = preloaded_datastore.metric_fields_by_volume(metric_name="TestMetric", count=5,
+                                                            metadata_filter={'platform': 'fail'})
+        assert items.timestamps == items.metadata == []
+        assert items.metric_data == {}
+
+    def test_metric_fields_by_date_with_filter(self, preloaded_datastore: SQLMetricStore):
+        system_info = Metadata.system_info()
+        timestamp = preloaded_datastore.base_timestamp
+        oldest = timestamp - datetime.timedelta(seconds=10)
+        items = preloaded_datastore.metric_fields_by_date(metric_name="TestMetric",
+                                                          oldest=oldest,
+                                                          metadata_filter={'platform': system_info.values['platform']})
+        all_items = preloaded_datastore.metric_fields_by_date(metric_name="TestMetric",
+                                                              oldest=oldest - datetime.timedelta(days=100))
+        items_key0 = list(items.metric_data.keys())[0]
+        assert len(items.metric_data[items_key0]) > 0
+        assert len(items.metric_data[items_key0]) < 100
+        assert len(all_items.timestamps) == 100
+        sorted_items = all_items.metric_data[items_key0][-len(items.metric_data[items_key0]):]
+        for index, item in enumerate(sorted_items):
+            assert item in items.metric_data[items_key0]
+        for index in range(1, len(all_items.timestamps)):
+            assert all_items.timestamps[index-1] < all_items.timestamps[index]
+        items = preloaded_datastore.metric_fields_by_date(metric_name="TestMetric",
+                                                          oldest=oldest,
+                                                          metadata_filter={'platform': 'no_such_platform'})
+        assert items.timestamps == items.metadata
+        assert items.metric_data == {}
