@@ -5,7 +5,7 @@ from typing import Optional
 import pytest
 
 from daktylos.data import CompositeMetric, Metric, Metadata, MetricDataClass
-from daktylos.data_stores.sql import SQLMetricStore, SQLCompositeMetric, SQLMetadataSet, SQLMetadata
+from daktylos.data_stores.sql import SQLMetricStore
 
 metadata = Metadata.system_info()
 
@@ -26,21 +26,33 @@ class TestMetricData:
 class TestSQLMetricStore:
 
     def test_purge_by_date(self, preloaded_datastore: SQLMetricStore):
+        SQLCompositeMetric = preloaded_datastore.SQLCompositeMetric
+        SQLMetadataSet = preloaded_datastore.SQLMetadataSet
+        SQLMetadata = preloaded_datastore.SQLMetadata
         preloaded_datastore.purge_by_date(before=datetime.datetime.utcnow() - datetime.timedelta(days=1))
         assert preloaded_datastore._session.query(SQLCompositeMetric).all() == []
         assert preloaded_datastore._session.query(SQLMetadataSet).all() == []
         assert preloaded_datastore._session.query(SQLMetadata).all() == []
 
     def test_purge_by_volume(self, preloaded_datastore: SQLMetricStore):
+        SQLCompositeMetric = preloaded_datastore.SQLCompositeMetric
+        SQLMetadataSet = preloaded_datastore.SQLMetadataSet
+        SQLMetadata = preloaded_datastore.SQLMetadata
         assert preloaded_datastore._session.query(SQLCompositeMetric).count() == 100
-        preloaded_datastore.purge_by_volume(count=50, name="TestMetric")
+        preloaded_datastore.purge_by_volume(count_=50, name="TestMetric")
         assert preloaded_datastore._session.query(SQLCompositeMetric).count() == 50
         assert preloaded_datastore._session.query(SQLMetadataSet).count() == 1
         assert preloaded_datastore._session.query(SQLMetadata).count() == 6
         for item in preloaded_datastore._session.query(SQLCompositeMetric).all():
-            assert int(item.children[0].value) < 51
+            for child in item.children + [None]:
+                if child is None:
+                    assert False, "Expected child but found none"
+                if child.name == '/TestMetric#child1':
+                    assert int(child.value) < 51
+                    break
 
     def test_post_data(self, datastore: SQLMetricStore):
+        SQLCompositeMetric = datastore.SQLCompositeMetric
         @dataclass
         class ChildMetric(MetricDataClass):
             grandchlid1: float
@@ -68,15 +80,17 @@ class TestSQLMetricStore:
             datastore.post_data("TestMetric", item,
                                 metadata=metadata,
                                 timestamp=datetime.datetime.utcnow(), project_name="TestProject", uuid="test_uuid")
+        datastore.commit()
         assert datastore._session.query(SQLCompositeMetric).count() == 100
         for item in datastore._session.query(SQLCompositeMetric).all():
-            index = int(item.children[0].value)
-            assert item.children[1].value == compare[index].child2.grandchlid1
-            assert item.children[2].value == compare[index].child2.grandchild2
-            assert item.children[3].value == compare[index].child3
+            children = {child.name: child.value for child in item.children}
+            index = int(children['/TestMetric#child1'])
+            assert children['/TestMetric/child2#grandchlid1'] == pytest.approx(compare[index].child2.grandchlid1, 0.000001)
+            assert children['/TestMetric/child2#grandchild2'] == pytest.approx(compare[index].child2.grandchild2, 0.000001)
+            assert children['/TestMetric#child3'] == pytest.approx(compare[index].child3, 0.000001)
 
     def test_post(self, datastore: SQLMetricStore):
-
+        SQLCompositeMetric = datastore.SQLCompositeMetric
         def data_generator():
             seed = [1, 28832.12993, 0.00081238, 291]
             for index in range(100):
@@ -104,12 +118,14 @@ class TestSQLMetricStore:
             compare[int(item['#child1'].value)] = item
             datastore.post(item, datetime.datetime.utcnow(), metadata=metadata,
                            project_name="TestProject", uuid="test_uuid")
+        datastore.commit()
         assert datastore._session.query(SQLCompositeMetric).count() == 100
         for item in datastore._session.query(SQLCompositeMetric).all():
-            index = int(item.children[0].value)
-            assert item.children[1].value == compare[index]['child2']['grandchild2.1'].value
-            assert item.children[2].value == compare[index]['child2']['#grandchild2.2'].value
-            assert item.children[3].value == compare[index]['child3#grandchild3.1'].value
+            children = {child.name: child.value for child in item.children}
+            index = int(children['/TestMetric#child1'])
+            assert children['/TestMetric/child2#grandchild2.1'] == pytest.approx(compare[index]['child2']['grandchild2.1'].value, 0.000001)
+            assert children['/TestMetric/child2#grandchild2.2'] == pytest.approx(compare[index]['child2']['#grandchild2.2'].value, 0.000001)
+            assert children['/TestMetric/child3#grandchild3.1'] == pytest.approx(compare[index]['child3#grandchild3.1'].value, 0.000001)
 
     def test_metrics_by_date(self, preloaded_datastore: SQLMetricStore):
         timestamp = preloaded_datastore.base_timestamp

@@ -30,10 +30,12 @@ from sqlalchemy import (
     exists,
     Float,
     ForeignKey,
+    Integer,
     String,
+    Text,
     TIMESTAMP,
     Table,
-    UniqueConstraint, or_, Integer,
+    or_,
 )
 from sqlalchemy.orm import (
     relationship,
@@ -53,7 +55,7 @@ Session = sessionmaker(autoflush=False, autocommit=False)
 log = logging.getLogger("SQLMetricStore")
 log.setLevel(logging.WARNING)
 
-MetadataEnumColumnType = sqlalchemy.Enum(Metadata.Types)
+MetadataEnumColumnType = Column(Integer)
 
 
 class SQLMetadata(Base):
@@ -64,11 +66,10 @@ class SQLMetadata(Base):
     """
     __tablename__ = "metadata"
 
-    id = Column(Integer, primary_key=True)
+    uuid = Column(String(255), primary_key=True)
     name = Column(String(127))
     typ = MetadataEnumColumnType
-    value = Column(String(255))
-    __table_args__ = (UniqueConstraint('name', 'value', name='unique1'),)
+    value = Column(Text)
 
 
 # association between metrics and sets of metadata
@@ -77,8 +78,8 @@ class SQLMetadata(Base):
 # pairs are constrained to be unique, minimizing overall storage needs
 SQLMetadataAssociationTable = Table(
     "metadata_associations", Base.metadata,
-    Column("matadata_set_uuid", String(255), ForeignKey('metadata_sets.uuid')),
-    Column("metadata_id", Integer, ForeignKey('metadata.id'))
+    Column("metadata_set_id", String(255), ForeignKey('metadata_sets.uuid')),
+    Column("metadata_id", String(255), ForeignKey('metadata.uuid'))
 )
 
 
@@ -90,7 +91,7 @@ class SQLMetadataSet(Base):
     """
     __tablename__ = "metadata_sets"
     uuid = Column(String(255), primary_key=True)
-    data = relationship("SQLMetadata", secondary=SQLMetadataAssociationTable, cascade="all, delete")
+    data = relationship("SQLMetadata", secondary=SQLMetadataAssociationTable)
 
 
 class SQLMetric(Base):
@@ -99,11 +100,10 @@ class SQLMetric(Base):
     """
     __tablename__ = "metric_values"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(String(255), primary_key=True)
     name = Column(String(255))
-    value = Column(Float(precision=30))
-    parent_id = Column(Integer, ForeignKey("composite_metrics.id"))
-    __table_args__ = (UniqueConstraint('name', 'value', name='unique_metric'),)
+    value = Column(Float)
+    parent_id = Column(String(255), ForeignKey("composite_metrics.id"))
 
 
 class SQLCompositeMetric(Base):
@@ -113,7 +113,7 @@ class SQLCompositeMetric(Base):
     """
     __tablename__ = 'composite_metrics'
 
-    id = Column(Integer, primary_key=True)
+    id = Column(String(255), primary_key=True)
     name = Column(String(127))
     timestamp = Column(TIMESTAMP)
     project = Column(String(127), nullable=True)
@@ -158,7 +158,7 @@ class SQLMetricStore(MetricStore):
         """
         Concrtete implementation of a SQL query interface
         """
-
+        
         def __init__(self, store: "SQLMetricStore", metric_name: str, max_count: Optional[int] = None):
             super().__init__(metric_name=metric_name, max_count=max_count)
             self._session = store._session
@@ -177,7 +177,6 @@ class SQLMetricStore(MetricStore):
         def filter_on_metadata(self, **kwds) -> "Query":
             alias = aliased(SQLMetadata, name="metadata_1")
             alias_set = aliased(SQLMetadataSet, name="metadata_set_1")
-            alias_set2 = aliased(SQLMetadataSet, name="metadata_set_2")
             if not self._joined:
                 self._statement = self._statement.join(alias_set,
                                                        alias_set.uuid == SQLCompositeMetric.metadata_id)
@@ -186,14 +185,13 @@ class SQLMetricStore(MetricStore):
                 self._statement = self._statement.filter(
                     self._session.query(SQLMetadataAssociationTable).join(
                         alias,
-                        alias_set2).filter(
-                        SQLMetadataAssociationTable.columns.matadata_set_uuid == alias_set2.uuid).filter(
-                        SQLMetadataAssociationTable.columns.metadata_id == alias.id).filter(
+                        SQLMetadataAssociationTable.columns.metadata_set_id == alias_set.uuid).filter(
+                        SQLMetadataAssociationTable.columns.metadata_id == alias.uuid).filter(
                         alias.name == name).filter(
                         alias.value == value).exists()
                 )
             return self
-
+        
         def filter_on_metadata_field(self, name: str, value: int, op: MetricStore.Comparison):
             alias = aliased(SQLMetadata, name='metadata_field_' + name)
             alias_set = aliased(SQLMetadataSet, name="metadata_set_1")
@@ -203,8 +201,8 @@ class SQLMetricStore(MetricStore):
                 self._joined = True
             query = self._session.query(SQLMetadataAssociationTable).join(
                     alias,
-                    SQLMetadataAssociationTable.columns.matadata_set_uuid == alias_set.uuid).filter(
-                    SQLMetadataAssociationTable.columns.metadata_id == alias.id)
+                    SQLMetadataAssociationTable.columns.metadata_set_id == alias_set.uuid).filter(
+                    SQLMetadataAssociationTable.columns.metadata_id == alias.uuid)
             if op == MetricStore.Comparison.EQUAL:
                 query = query.filter(alias.name == name, alias.value == value)
             elif op == MetricStore.Comparison.NOT_EQUAL:
@@ -298,7 +296,7 @@ class SQLMetricStore(MetricStore):
             if self._max_count:
                 query = self._session.query(SQLCompositeMetric.id).order_by(desc(SQLCompositeMetric.timestamp)).\
                     limit(self._max_count)
-                self._statement = self._statement.filter(SQLCompositeMetric.id.in_([r.id for r in query.all()]))  # MySQL forces the .all()
+                self._statement = self._statement.filter(SQLCompositeMetric.id.in_(query))
             sql_result: List[SQLCompositeMetric] = self._statement.all()
             result: QueryResult[Dict[str, List[float]]] = QueryResult()
             result.metric_data = {}  # correction on default type/value
@@ -395,9 +393,10 @@ class SQLMetricStore(MetricStore):
             if type(value) not in [str, int]:
                 raise ValueError(f"Invalid type for metadata named {name} with type {type(value).__name__}")
             type_enum = {str: Metadata.Types.STRING,
-                         int: Metadata.Types.INTEGER}[type(value)]
+                         int: Metadata.Types.INTEGER}[type(value)].value
             if (name, value) not in existing_name_values:
                 metadata = SQLMetadata(name=name, value=str(value), typ=type_enum)
+                metadata.uuid = self._uuid({name: value})
                 sql_metadata_set.data.append(metadata)
         self._session.commit()
         return sql_metadata_set
@@ -409,6 +408,18 @@ class SQLMetricStore(MetricStore):
         orphaned = self._session.query(SQLMetadataSet).filter(~ exists().where(
             SQLMetadataSet.uuid == SQLCompositeMetric.metadata_id
         )).all()
+        for orphan in orphaned:
+            self._engine.execute(SQLMetadataAssociationTable.delete().where(
+                SQLMetadataAssociationTable.columns.metadata_set_id == orphan.uuid
+            )
+            )
+        self._session.commit()
+        orphaned_values = self._session.query(SQLMetadata).filter(~ exists().where(
+             SQLMetadata.uuid == SQLMetadataAssociationTable.columns.metadata_id
+        ))
+        for orphan in orphaned_values:
+            self._session.delete(orphan)
+        self._session.commit()
         for orphan in orphaned:
             self._session.delete(orphan)
 
@@ -423,10 +434,6 @@ class SQLMetricStore(MetricStore):
         else:
             statement = self._session.query(SQLCompositeMetric).filter(SQLCompositeMetric.timestamp < before,
                                                                        SQLCompositeMetric.name == name)
-        for item in statement.all():
-            item.children.clear()
-            item.metrics_metadata = None
-        self._session.commit()
         statement.delete()
         self._purge_orphaned_metadatsets()
         self._session.commit()
@@ -444,10 +451,6 @@ class SQLMetricStore(MetricStore):
             statement = statement.join(SQLCompositeMetric.metadata_id)
         statement = statement.filter(SQLCompositeMetric.name == name,
                                      SQLCompositeMetric.timestamp <= purge_date[0])
-        for item in statement.all():
-            item.children.clear()
-            item.metrics_metadata = None
-        self._session.commit()
         statement.delete()
         self._purge_orphaned_metadatsets()
         self._session.commit()
@@ -467,8 +470,10 @@ class SQLMetricStore(MetricStore):
         key_values = metric.flatten()
         metrics = []
         for key, value in key_values.items():
-            metrics.append(SQLMetric(name=key, value=str(value)))
-        metric_item = SQLCompositeMetric(name=metric.name,
+            metrics.append(SQLMetric(id=self._uuid({key: value}), name=key, value=str(value)))
+        sql_uuid = self._uuid({'name': metric.name, 'ts': str(timestamp), 'project': project_name})
+        metric_item = SQLCompositeMetric(id=sql_uuid,
+                                         name=metric.name,
                                          children=metrics,
                                          timestamp=timestamp,
                                          project=project_name,

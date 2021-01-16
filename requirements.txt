@@ -1,7 +1,5 @@
 pyyaml==5.*
-sqlalchemy=1.*
-
-pathlib~=1.0.1
-SQLAlchemy~=1.3.18
+sqlalchemy==1.*
+sqlalchemy-redshift==0.8.2
 pytest~=6.0.1
 setuptools~=40.8.0

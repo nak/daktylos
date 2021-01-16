@@ -15,12 +15,12 @@ Indices and tables
 * :ref:`modindex`
 * :ref:`search`
 
-Introduction
-============
+Introduction/class
+==================
 
-Welcome to *daktylos*, a simple framework for storing and retrieving hierarchical metric values.  The insipration
+Welcome to *daktylos*, a simple framework for storing and retrieving hierarchical metric values.  The inspiration
 for this came from a need to capture code quality and performance metrics, such as code coverage data or startup times
-for an app, in a simple, performant manner, and apply validation rules (copmaring against a threshold value) to them.
+for an app, in a simple, performant manner, and apply validation rules (comparing against a threshold value) to them.
 
 The name Daktylos comes from an ancient Greek unit of measurement, one that is based on the length of a finger.  Since
 the initial need to create *daktylos* comes from capturing metrics that provide insights to the developer that inform
@@ -29,25 +29,43 @@ him or her about direct measurements of the code written, this seemed a fitting 
 Creating Metrics
 ================
 
-*daktylos* is designed around capturing a set of related metrics in a hierarchy.  Composite metrics can be created
-in a leaf-branch style architecture, and child metrics can be referenced down through a hierarchy based on a
-dict-like interface.
+*daktylos* is designed around capturing a set of related metrics in a hierarchy.  Composite metrics that are
+consumable by *daktylos* can be created in two ways: using data classes or constructing explicit composite metrics
+programatically.  In general, using dataclasses is simpler.  However, if you expect frequent changes (additions,
+deletions, renaming of elements) over time, dataclasses can start to get messy and even problematic.  In such
+as case, the programmatic approach is advisable.
+
+Creation through Dataclasses
+----------------------------
+
+Generally speaking, as long as a dataclass follows some basic rules, they can be used as is without any need
+for special code.  It is adviable, however, to inherit your data class from `daktylos.data.MetricDataClass` as
+this will ensure the rules are enforced when using a tool like mypy, at least in principle.
+
+.. autoclass:: daktylos.data.MetricDataClass
+
+
+Programmatic Creation
+---------------------
+Composite metrics cstr contructed programatically in a leaf-branch style architecture.
+
 
 .. automodule:: daktylos.data
-    :members: Metric, CompositeMetric
+    :members: CompositeMetric, Metric
 
 Metrics Storage
 ===============
 
 *daktylos* provides the ability to store, retrieve and purge metrics from a relational database.  It also probides
-the proper abstraction for data access:
+the proper abstraction for data access.  A specific implementation via SQL and
+`_SqlAlchemy <https://www.sqlalchemy.org/>` is provided.
 
-.. autoclass:: daktylos.data.MetricStore
+.. automodule:: daktylos.data
+    :members: MetricStore
 
-with the specific implementation via SQL and `SqlAlchemy <https://>` provided through the *daktylos.data_stores.sql`
-module:
 
-.. autoclass:: daktylos.data_stores.sql.SQLMetricStore
+.. automodule:: daktylos.data_stores.sql
+    :members: SQLMetricStore
 
 Applying Rules to Metrics
 =========================

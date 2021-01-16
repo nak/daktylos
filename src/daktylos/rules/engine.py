@@ -45,7 +45,7 @@ class Rule:
 
         :param msg: exception message
         :param parent: The parent composite metric that contains violations of this rule
-        :param offending_element: the key-paths to the core `Metric` (containing the values) that violated thresholds
+        :param offending_elements: the key-paths to the core `Metric` (containing the values) that violated thresholds
         """
 
         def __init__(self, msg: str, parent: CompositeMetric, offending_elements: Iterable[str]):
@@ -278,6 +278,15 @@ class RulesEngine:
             return rules_engine
 
     def process(self, composite_metric: CompositeMetric, previous_metric: Optional[CompositeMetric] = None):
+        """
+        process the given composite metric (against previous metric if provided) and generate all failures against
+        the rules
+
+        :param composite_metric: the metric to test
+        :param previous_metric: if not None, previous value for evaluating comparison rules if any
+
+        :return: a generator of any alerts against  or violations of the rules
+        """
         for ruleset in self._rulesets:
             for failure in ruleset.process(composite_metric, previous_metric):
                 yield failure

@@ -1,4 +1,5 @@
 import datetime
+from contextlib import suppress
 
 import sqlalchemy
 
@@ -6,7 +7,11 @@ import pytest
 from typing import Optional
 
 from daktylos.data import CompositeMetric, Metric, Metadata
-from daktylos.data_stores.sql import SQLMetricStore, SQLCompositeMetric, SQLMetadataSet, SQLMetadata, SQLMetric
+import os
+
+# import logging
+# logging.basicConfig()
+# logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
 
 
 def data_generator():
@@ -38,38 +43,127 @@ def engine():
 
 
 @pytest.fixture(scope='function')
-def datastore(engine):
+def redshift_engine():
+    return sqlalchemy.create_engine()
+
+
+MYSQL_USER = os.environ.get("MYSQL_USER")
+MYSQL_PSWD = os.environ.get("MYSQL_PSWD")
+REDSHIFT_USER = os.environ.get("REDSHIFT_USER")
+REDSHIFT_PSWD = os.environ.get("REDSHIFT_PSWD")
+
+
+db_urls = [
+    "sqlite:///:memory:"
+]
+if REDSHIFT_PSWD and REDSHIFT_USER:
+    db_urls.append(f"redshift+psycopg2://{REDSHIFT_USER}:{REDSHIFT_PSWD}@redshift-cluster-2.czb6gvb6mhmn.us-west-1.redshift.amazonaws.com:5439/dev")
+if MYSQL_PSWD and MYSQL_USER:
+    db_urls.append(f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PSWD}@localhost/daktylos?charset=utf8mb4")
+
+
+def clear_store(datastore, dburl):
+    if 'redshift' in dburl:
+        from daktylos.data_stores.sql_crippled import (
+            SQLMetricStore,
+            SQLCompositeMetric,
+            SQLMetadataSet,
+            SQLMetadata,
+            SQLMetric,
+        )
+    else:
+        from daktylos.data_stores.sql import (
+            SQLMetricStore,
+            SQLCompositeMetric,
+            SQLMetadataSet,
+            SQLMetadata,
+            SQLMetric,
+        )
+    # datastore._session.rollback()
+    datastore._session.commit()
+    datastore._session.query(SQLMetric).delete()
+    datastore._session.query(SQLCompositeMetric).delete()
+    for item in datastore._session.query(SQLMetadataSet):
+        item.data.clear()
+    datastore._session.commit()
+    datastore._session.query(SQLMetadata).delete()
+    datastore._session.query(SQLMetadataSet).delete()
+    datastore._session.commit()
+
+
+@pytest.fixture(scope='function', params=db_urls)
+def datastore(request):
+    engine = sqlalchemy.create_engine(request.param)
+    if 'redshift' in request.param:
+        from daktylos.data_stores.sql_crippled import (
+            SQLMetricStore,
+            SQLCompositeMetric,
+            SQLMetadataSet,
+            SQLMetadata,
+            SQLMetric,
+        )
+    else:
+        from daktylos.data_stores.sql import (
+            SQLMetricStore,
+            SQLCompositeMetric,
+            SQLMetadataSet,
+            SQLMetadata,
+            SQLMetric,
+        )
     with SQLMetricStore(engine=engine, create=True) as store:
+        store.SQLCompositeMetric = SQLCompositeMetric
+        store.SQLMetadataSet = SQLMetadataSet
+        store.SQLMetadata = SQLMetadata
+        store.SQLMetric = SQLMetric
         try:
             yield store
         finally:
-            store._session.query(SQLCompositeMetric).delete()
-            store._session.query(SQLMetadataSet).delete()
-            store._session.query(SQLMetadata).delete()
-            store._session.query(SQLMetric).delete()
-            store._session.commit()
+            clear_store(store, request.param)
 
 
-@pytest.fixture(scope='function')
-def preloaded_datastore(engine):
+@pytest.fixture(scope='function', params=db_urls)
+def preloaded_datastore(request):
+    engine = sqlalchemy.create_engine(request.param)
     metadata = Metadata.system_info()
     timestamp = datetime.datetime.utcnow()
+    # import daktylos.data_stores.sql as sql
+    # sql.Base.metadata.drop_all(engine)
+    if 'redshift' in request.param:
+        from daktylos.data_stores.sql_crippled import (
+            SQLMetricStore,
+            SQLCompositeMetric,
+            SQLMetadataSet,
+            SQLMetadata,
+            SQLMetric,
+        )
+    else:
+        from daktylos.data_stores.sql import (
+            SQLMetricStore,
+            SQLCompositeMetric,
+            SQLMetadataSet,
+            SQLMetadata,
+            SQLMetric,
+        )
     with SQLMetricStore(engine=engine, create=True) as datastore:
+        datastore.SQLCompositeMetric = SQLCompositeMetric
+        datastore.SQLMetadataSet = SQLMetadataSet
+        datastore.SQLMetadata = SQLMetadata
+        datastore.SQLMetric = SQLMetric
+        clear_store(datastore, request.param)
         try:
             index = 0
             for metric in data_generator():
                 datastore.post(metric, timestamp - datetime.timedelta(seconds=index),
                                metadata=metadata)
                 index += 1
+            datastore.commit()
             assert datastore._session.query(SQLCompositeMetric).count() == 100
             datastore.base_timestamp = timestamp
+            datastore.commit()
             yield datastore
         finally:
-            datastore._session.query(SQLCompositeMetric).delete()
-            datastore._session.query(SQLMetadataSet).delete()
-            datastore._session.query(SQLMetadata).delete()
-            datastore._session.query(SQLMetric).delete()
-            datastore._session.commit()
+            with suppress(Exception):
+                clear_store(datastore, request.param)
 
 
 class CodeCoverageMetrics(CompositeMetric):

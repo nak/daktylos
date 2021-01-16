@@ -1,68 +1,7 @@
 """
-This module contains the classes used to define composite metrics, a hierarchical collection of floating point metric
-values.  It also defines the interface for collection and retrieval of those values from a data store.
+The *daktylos.data* contains the classes used to define composite metrics, a hierarchical collection of floating point
+metric values.  It also defines the interface for collection and retrieval of those values from a data store.
 
-Top-level (root) :class:`CompositeMetric` instances
-provide a general way for describing complex, related metric sets that makes it easy to serialize and deserialize
-the data for  storage and rules specifications.  However, when developing an API around
-specific composite metrics, the recommended practice is to subclass off of a :class:`CompositeMetric` class to provide
-a clean interface:
-
->>> from daktylos.data import CompositeMetric, MetricDataClass
-... @dataclass(frozen=True)
-... class SingleTestPerformanceData(MetricDataClass):
-...    user_cpu: float
-...    system_cpu: float
-...    duration: float
-...    memory_consumed: float
-...
-...
-... @dataclass
-... class TestRunPerofmrnaceData(MetricDataClass):
-...    total_user_cpu: float
-...    total_system_cpu: float
-...    total_duration: float
-...    total_memory_consumed_mb: float
-...    by_test: Dict[str, SingleTestPerformanceData]
-...
-...    def add_test_performance(self, test_name: str, performance: SingleTestPerformanceData):
-...        self.by_test[test_name] = performance
-...
-... test_run_performance = TestRunPerofmrnaceData(total_user_cpu=11.2, total_system_cpu=0.1, total_duration=14.0, \
-...          total_memory_consumed=12.1)
-... test_run_performance.add_test_performance("test1", performance=SingleTestPerformanceData(
-...     user_cpu=1.2, system_cpu=0.01, duration=3.8, memory_consumed=.192))
-... test_run_metrics = CompositeMetric.from_dataclass(test_run_performance)
-
-or a purely programmatic approach:
-
->>>  class TestRunPerformanceMetics(CompositeMetric):
-...     def __init__(self, total_ucpu_secs: float, total_scpu_secs: float, total_duration: float,
-...                  memory_consumed_mb: float):
-...        super().__init__(self.__class__.__name__)
-...        super().add_key_value("total_user_cpu", total_ucpu_secs))
-...        super().add_key_value("total_system_cpu", total_scpu_secs))
-...        super().add_key_value("total_duration", total_duration))
-...        super().add_key_value("memory_consumed", memory_consumed_mb))
-...        self._by_test = super().add(CompositeMetric("by_test"))
-...
-...     def add_test_performance(self, test_name: str, test_ucpu: float,
-...                              test_scpu: float, duration: float, test_memory_consumed: float):
-...         test_metrics = CompositeMetric(test_name)
-...         test_metrics.add_key_value("user_cpu", test_ucpu))
-...         test_metrics.add_key_value("user_spu", test_scpu))
-...         test_metrics.add_key_value("duration", duration))
-...         test_metrics.add_key_value("memory_consumed", test_memory_consumed))
-...         self._by_test.add(test_metrics)
-...
-...  test_run_metrics = TestRunPerformanceMetics(total_ucpu_secs=11.2, total_scpu_secs=1.2, total_duration=12.3,
-...     memory_consumed_mb=12.2)
-...  test_run_metrics.add_test_performance("test1", test_ucpu=2.3, test_scpu=0.1, test_memory_consumed=0.191,
-...     duration=2.9)
-
-
-This class provides a target-specific interface for performance metrics for a test run, without the
-client having to know the details of the naming and hierarchy of the underlying :class:`CompositeMetric`
 
 This module also provides the data abstraction for storing, retrieiving and purging metrics from an external
 data store. A SQL implmementation can be found in :mod:`daktylos.data_stores.sql`.
@@ -76,13 +15,13 @@ from abc import abstractmethod, ABC
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import (List, Dict, Optional, Iterable, Union, Set, TypeVar, Type, Tuple, Generic)
+from typing import (List, Dict, Optional, Iterable, Union, Set, TypeVar, Type, Generic)
 try:
     from typing import Protocol
 except ImportError:
     from typing_extensions import Protocol
 
-__all__ = ["Metadata", "Metric", "CompositeMetric", "MetricStore", "MetricDataClass", "MDC"]
+__all__ = ["Metadata", "Metric", "CompositeMetric", "MetricStore", "MetricDataClass", "MDC", "Query", "QueryResult"]
 
 # define convenience types for type hints and such:
 number = Union[float, int]
@@ -96,8 +35,25 @@ MDC = TypeVar('MDC')
 
 class MetricDataClass(Protocol):
     """
+    Base class for composite metrics as dataclass.
     Inherit a @dataclass from this class so that mypy checks will ensure only float, int or recursive MetricDataClass
     elements are allowed
+
+    Field types allowed are:
+    #. int, float, str
+    #. Any other @dataclass that follows these guidelines
+    #. Dict[str, <any type from 1.) or 2.) or 3.)>]
+    #. Optional value of any of 1.) 2.) or 3.) provided it has a default value
+
+    >>> from dataclasses import dataclass
+    ... from daktylos.data import MetricDataClass
+    ...
+    ... @dataclass
+    ... class CodeCoverageMetricData(MetricDataClass):
+    ...     total_cov: float
+    ...     by_file: Dict[str, float]
+    ...     by_package: Optional[Dict[str, float]] = None
+
     """
     __dataclass_fields__: Dict[str, metric_data_field]
 
@@ -116,8 +72,8 @@ class Metadata:
         """
         Allowed types of metadata
         """
-        STRING = 'str'
-        INTEGER = 'int'
+        STRING = 0 #'str'
+        INTEGER = 1 # 'int'
 
     values: Dict[str, Union[str, int]]
     """
@@ -314,7 +270,7 @@ class Metric(BasicMetric):
         self.value = value
 
     def flatten(self, prefix: str = "") -> Dict[str, number]:
-        return {'#'.join([prefix, self.name]): self.value} if prefix else  {self.name: self.value}
+        return {'#'.join([prefix, self.name]): self.value} if prefix else {self.name: self.value}
 
     def __eq__(self, other: BasicMetric):
         if self is other:
@@ -328,24 +284,56 @@ class Metric(BasicMetric):
 @dataclass
 class CompositeMetric(BasicMetric):
     """
-    CompositMetric comprising a collection of other :class:`Metric` or :class:`CompositeMetric` instances.
-    The collection of metrics is contained in a hierarchy through a branch-leaf style design.
+    Top-level (root) :class:`CompositeMetric` instances
+    provide a general way for describing a related set of metric that makes it easy to serialize and deserialize
+    the data for storage and evaluation.  When developing an API around
+    specific composite metrics, the recommended practice is to subclass off of a :class:`CompositeMetric` class to
+    provide a clean interface
 
-    Lookup of metrics within the hierarchy can be done in several ways.  First, through a single
-    key constructed as a path assembled from the names of each metric, in the form
-    *"/composite_child_metric_name/composite_grandchild_metric_name#metric_name"*,
-    where the '#' is used to indicate the final component is a core :class:`Metric` and not composite
-    (otherwise the path separators are all '/').  The can also be referenced by dot-notation:
-    given a composite root metric "*root*",
-    *root.composite_child_metric_name.composite_grandchild_metric_name.metric_name*
-    will yield the same result. The attributes are generated dymically, of course, so IDEs will not
-    be able to statically validate code under this convention.
 
     :param name: unique name of type of composit metric
     :param values: optional list of BasicMetric (either `Metric` or `CompositMetric` instances) to initially
        populate this metric
 
-    >>> performance_metrics = CompositeMetric(name="Performance")
+    >>> from daktylos.data import CompositeMetric
+    ...
+    ...  class TestRunPerformanceMetics(CompositeMetric):
+    ...     def __init__(self, total_ucpu_secs: float, total_scpu_secs: float, total_duration: float,
+    ...                  memory_consumed_mb: float):
+    ...        super().__init__(self.__class__.__name__)
+    ...        super().add_key_value("total_user_cpu", total_ucpu_secs))
+    ...        super().add_key_value("total_system_cpu", total_scpu_secs))
+    ...        super().add_key_value("total_duration", total_duration))
+    ...        super().add_key_value("memory_consumed", memory_consumed_mb))
+    ...        self._by_test = super().add(CompositeMetric("by_test"))
+    ...
+    ...     def add_test_performance(self, test_name: str, test_ucpu: float,
+    ...                              test_scpu: float, duration: float, test_memory_consumed: float):
+    ...         test_metrics = CompositeMetric(test_name)
+    ...         test_metrics.add_key_value("user_cpu", test_ucpu))
+    ...         test_metrics.add_key_value("user_spu", test_scpu))
+    ...         test_metrics.add_key_value("duration", duration))
+    ...         test_metrics.add_key_value("memory_consumed", test_memory_consumed))
+    ...         self._by_test.add(test_metrics)
+    ...
+    ...  test_run_metrics = TestRunPerformanceMetics(total_ucpu_secs=11.2, total_scpu_secs=1.2, total_duration=12.3,
+    ...     memory_consumed_mb=12.2)
+    ...  test_run_metrics.add_test_performance("test1", test_ucpu=2.3, test_scpu=0.1, test_memory_consumed=0.191,
+    ...     duration=2.9)
+
+
+    Lookup of metrics within the hierarchy can be done in several ways.  First, through a single
+    key constructed as a path assembled from the names of each metric, in the form
+    *"/composite_child_metric_name/composite_grandchild_metric_name#metric_name"*.
+    The path seaparator is '/' except for the final leaf where'#' is used as the separator.
+    The element can also be referenced by dot-notation:
+    given a composite root metric "*root*",
+    *root.composite_child_metric_name.composite_grandchild_metric_name.metric_name*
+    will yield the same result. The attributes are generated dymically, of course, so IDEs will not
+    be able to statically validate code under this convention.
+
+    >>> from daktylos.data import CompositeMetric, Metric
+    ... performance_metrics = CompositeMetric(name="Performance")
     ... overall_metric = CompositeMetric(name='overall_usage')
     ... performance_metrics.add(overall_metric)
     ... overall_scpu_metric = Metric(name='system_cpu', value=2.1)
@@ -363,6 +351,10 @@ class CompositeMetric(BasicMetric):
     ...  'Performacne/by_test/test1_usage#system_cpu': 0.1,
     ...  'Performance/by_test/test1_usage#user_cpu': 88.2
     ... }
+    ... performance_metrics["/Performance/overallusage#system_cpu"]
+    ... 2.1
+    ... performance_metrics.overallusage.system_cpu
+    ... 2.1
     """
 
     value: Dict[str, BasicMetric]
@@ -490,8 +482,9 @@ class CompositeMetric(BasicMetric):
             raise KeyError(f"{key_path} not found in this composite metric")
         return child
 
-    def to_dataclass(self, typ: Type[Union[MetricDataClassT, Dict[str, metric_data_field]]])\
-        -> Union[MetricDataClassT, Dict[str, metric_data_field]]:
+    # noinspection PyProtectedMember
+    def to_dataclass(self, typ: Type[Union[MetricDataClassT, Dict[str, metric_data_field]]]) -> \
+            Union[MetricDataClassT, Dict[str, metric_data_field]]:
         """
         Convert to @dataclass MetricDataClass instance
 
@@ -499,7 +492,7 @@ class CompositeMetric(BasicMetric):
         :return: equivalent composit metrics instance of given type
         """
         kwds = {}
-        if hasattr(typ, '_name') and typ._name == 'Dict':
+        if hasattr(typ, '_name') and 'Dict' == typ._name:
             # process a dictionary of fixed type value and return
             field_type = typ.__args__[1]
             for key, value in self.value.items():
@@ -520,14 +513,14 @@ class CompositeMetric(BasicMetric):
                 if isinstance(value, Metric):
                     field_type = typ.__dataclass_fields__[key].type
                     if hasattr(field_type, '__args__') and type(None) in field_type.__args__:
-                        field_type = [a for a in field_type.__args__ if a is not type(None)][0]
-                    if not field_type in (float, int):
+                        field_type = [a for a in field_type.__args__ if not isinstance(a, type(None))][0]
+                    if field_type not in (float, int):
                         raise TypeError(f"Type mismatch in field {key} of {typ}: expected float or int but got "
                                         f"{typ.__dataclass_fields__[key].type}")
                     kwds[key] = value.value
                 else:
                     field_type = typ.__dataclass_fields__[key].type
-                    if hasattr(field_type, '__args__') and  type(None) in field_type.__args__:
+                    if hasattr(field_type, '__args__') and type(None) in field_type.__args__:
                         field_type = [a for a in field_type.__args__ if a is not type(None)][0]
                     if not isinstance(value, CompositeMetric):
                         raise TypeError(f"Type of composite metrics field named '{key}' is not composite as expected "
@@ -559,76 +552,83 @@ class CompositeMetric(BasicMetric):
         return result
 
 
+@dataclass
+class QueryResult(Generic[MDC]):
+    """
+    Data class to hold list of timestamps, metadtaa and metric data
+    """
+    metadata: List[Optional[Metadata]] = field(default_factory=list)
+    timestamps: List[datetime.datetime] = field(default_factory=list)
+    metric_data: MDC = field(default_factory=list)
+
+
+class Query(Generic[MDC]):
+    """
+    abstract base Query class
+
+    :param metric_name: name of the compoiste metric to qeury
+    :param max_count: max number of entries to query
+    """
+
+    def __init__(self, metric_name: str, max_count: Optional[int] = None):
+        self._metric_name = metric_name
+        self._count = max_count
+
+    @property
+    def count(self) -> Optional[int]:
+        return self._count
+
+    @abstractmethod
+    def execute(self) -> "QueryResult[MDC]":
+        """
+        Execute the query
+        :return: list of Result from execution of the query
+        """
+
+    @abstractmethod
+    def filter_on_date(self, oldest: datetime.datetime, newest: datetime.datetime) -> "MetricStore.Query[MDC]":
+        """
+        Filter results on date range
+        :param oldest: oldest date
+        :param newest: newest date
+        :return: self
+        """
+
+    @abstractmethod
+    def filter_on_metadata(self, **kwds) -> "MetricStore.Query[MDC]":
+        """
+        filter on metadata fields matching given keyword/value pairs
+        :param kwds: keywords and values to filter on
+        :return:  self
+        """
+
+    @abstractmethod
+    def filter_on_metadata_field(self, name: str, value: int,
+                                 op: "MetricStore.Comparison") -> "MetricStore.Query[MDC]":
+        """
+        filter query on metadata field with given name against provided value
+        :param name: name of metadata field
+        :param value: value to compare against
+        :param op: type of comparison operation to perform
+        :return: self
+        """
+
 class MetricStore(AbstractContextManager):
     """
-    Abstract :class:`ContextManager` class defining interface for storing, retrieving and purging values
+    Context manager class defining interface for storing, retrieving and purging values
     from a data store
     """
 
     class Comparison(Enum):
+        """
+        Allowed types of comparisons
+        """
         EQUAL = "=="
         NOT_EQUAL = "<>"
         LESS_THAN = "<"
         GREATER_THAN = ">"
         LESS_THAN_OR_EQUAL = "<="
         GREATER_THAN_OR_EQUAL = ">="
-
-    @dataclass
-    class QueryResult(Generic[MDC]):
-        metadata: List[Optional[Metadata]] = field(default_factory=list)
-        timestamps: List[datetime.datetime] = field(default_factory=list)
-        metric_data: MDC = field(default_factory=list)
-
-    class Query(Generic[MDC]):
-        """
-        abstract base Query class
-
-        :param metric_name: name of the compoiste metric to qeury
-        :param max_count: max number of entries to query
-        """
-
-        def __init__(self, metric_name: str, max_count: Optional[int] = None):
-            self._metric_name = metric_name
-            self._count = max_count
-
-        @property
-        def count(self) -> Optional[int]:
-            return self._count
-
-        @abstractmethod
-        def execute(self) -> "MetricStore.QueryResult[MDC]":
-            """
-            Execute the query
-            :return: list of Result from execution of the query
-            """
-
-        @abstractmethod
-        def filter_on_date(self, oldest: datetime.datetime, newest: datetime.datetime) -> "MetricStore.Query[MDC]":
-            """
-            Filter results on date range
-            :param oldest: oldest date
-            :param newest: newest date
-            :return: self
-            """
-
-        @abstractmethod
-        def filter_on_metadata(self, **kwds) -> "MetricStore.Query[MDC]":
-            """
-            filter on metadata fields matching given keyword/value pairs
-            :param kwds: keywords and values to filter on
-            :return:  self
-            """
-
-        @abstractmethod
-        def filter_on_metadata_field(self, name: str, value: int,
-                                     op: "MetricStore.Comparison") -> "MetricStore.Query[MDC]":
-            """
-            filter query on metadata field with given name against provided value
-            :param name: name of metadata field
-            :param value: value to compare against
-            :param op: type of comparison operation to perform
-            :return: self
-            """
 
     @abstractmethod
     def __enter__(self) -> "MetricStore":
@@ -682,11 +682,12 @@ class MetricStore(AbstractContextManager):
                   metric_data: MetricDataClass,
                   timestamp: Optional[datetime.datetime] = None,
                   metadata: Optional[Metadata] = None,
-                  project_name: Optional[str] =None,
+                  project_name: Optional[str] = None,
                   uuid: Optional[str] = None):
         """
         Post the given metric data (as a data class instance) to this data store
 
+        :param metric_name: top-level name of metric
         :param metric_data: the metric data (in a dataclass instance) to post
         :param timestamp: the timestamp of the metric
         :param metadata: optional metadata associated with metric
@@ -776,7 +777,8 @@ class MetricStore(AbstractContextManager):
         :return: results of query, ordered by timestamp
         """
         newest = newest or datetime.datetime.utcnow()
-        items = self.composite_metrics_by_date(metric_name=name, oldest=oldest, newest=newest, metadata_filter=metadata_filter)
+        items = self.composite_metrics_by_date(metric_name=name, oldest=oldest, newest=newest,
+                                               metadata_filter=metadata_filter)
         items.metric_data = [metric.to_dataclass(typ) for metric in items.metric_data]
         return items
 
@@ -797,10 +799,10 @@ class MetricStore(AbstractContextManager):
         return result
 
     def metric_fields_by_date(self, metric_name: str,
+                              oldest: datetime.datetime, newest: Optional[datetime.datetime] = None,
                               fields: Optional[Iterable[str]] = None,
-                              oldest=datetime.datetime, newest: Optional[datetime.datetime] = None,
                               metadata_filter: Optional[Dict[str, str]] = None)\
-            -> Query[Dict[str, List[float]]]:
+            -> QueryResult[Dict[str, List[float]]]:
         """
         query and return metric data, timestamps and metadata for a given metric name based on date range and
         optional filter on metadata
@@ -825,7 +827,7 @@ class MetricStore(AbstractContextManager):
             -> "QueryResult[Dict[str, List[float]]]":
         """
          Return results of query stored ina per-field dictionary of data for all fields within a composite metric
-        :param name: name of metric
+        :param metric_name: name of metric
         :param fields: list of path-like fields (within a flattened metrics, e.g.), can be wildcarded
         :param count: max count to return (most recent)
         :param metadata_filter: filter on optional metadata
