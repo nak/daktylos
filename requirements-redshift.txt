@@ -1,0 +1,2 @@
+sqlalchemy-redshift==0.8.2
+psycopg2==2.8.*

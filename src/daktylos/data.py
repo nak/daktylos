@@ -31,6 +31,8 @@ metric_data_field = Union[
     Optional[Dict[str, "MetricDataClass"]]
 ]
 MDC = TypeVar('MDC')
+# noinspection PyTypeChecker
+MetricClass = TypeVar('MetricClass', bound='BasicMetric')
 
 
 class MetricDataClass(Protocol):
@@ -72,8 +74,8 @@ class Metadata:
         """
         Allowed types of metadata
         """
-        STRING = 0 #'str'
-        INTEGER = 1 # 'int'
+        STRING = 0
+        INTEGER = 1
 
     values: Dict[str, Union[str, int]]
     """
@@ -305,7 +307,7 @@ class CompositeMetric(BasicMetric):
     ...        super().add_key_value("total_system_cpu", total_scpu_secs))
     ...        super().add_key_value("total_duration", total_duration))
     ...        super().add_key_value("memory_consumed", memory_consumed_mb))
-    ...        self._by_test = super().add(CompositeMetric("by_test"))
+    ...        self._by_test: CompositeMetric = super().add(CompositeMetric("by_test"))
     ...
     ...     def add_test_performance(self, test_name: str, test_ucpu: float,
     ...                              test_scpu: float, duration: float, test_memory_consumed: float):
@@ -412,7 +414,7 @@ class CompositeMetric(BasicMetric):
                 return False
         return True
 
-    def add(self, value: BasicMetric) -> BasicMetric:
+    def add(self, value: MetricClass) -> MetricClass:
         """
         Add the given Metric of CompositeMetric to this one
 
@@ -579,14 +581,14 @@ class Query(Generic[MDC]):
         return self._count
 
     @abstractmethod
-    def execute(self) -> "QueryResult[MDC]":
+    def execute(self) -> "Union[QueryResult[List[MDC]], QueryResult[Dict[str, List[float]]]]":
         """
         Execute the query
         :return: list of Result from execution of the query
         """
 
     @abstractmethod
-    def filter_on_date(self, oldest: datetime.datetime, newest: datetime.datetime) -> "MetricStore.Query[MDC]":
+    def filter_on_date(self, oldest: datetime.datetime, newest: datetime.datetime) -> "Query[MDC]":
         """
         Filter results on date range
         :param oldest: oldest date
@@ -595,7 +597,7 @@ class Query(Generic[MDC]):
         """
 
     @abstractmethod
-    def filter_on_metadata(self, **kwds) -> "MetricStore.Query[MDC]":
+    def filter_on_metadata(self, **kwds) -> "Query[MDC]":
         """
         filter on metadata fields matching given keyword/value pairs
         :param kwds: keywords and values to filter on
@@ -604,7 +606,7 @@ class Query(Generic[MDC]):
 
     @abstractmethod
     def filter_on_metadata_field(self, name: str, value: int,
-                                 op: "MetricStore.Comparison") -> "MetricStore.Query[MDC]":
+                                 op: "MetricStore.Comparison") -> "Query[MDC]":
         """
         filter query on metadata field with given name against provided value
         :param name: name of metadata field
@@ -612,6 +614,7 @@ class Query(Generic[MDC]):
         :param op: type of comparison operation to perform
         :return: self
         """
+
 
 class MetricStore(AbstractContextManager):
     """
