@@ -31,6 +31,9 @@ datastore.metric_fields_by_date(metric_name="TopLevelMetricName",
     oldest=datatime.now() - datetime.timedelta(days=10))
 ```
 
+In the `daktylos.rules` package you will also find code for applying rules to composite metrics, 
+both in direct value and in relative (deltas from pervious values).  The rules engine takes
+a yaml file input to define the set of rules o be applied.
 
 
                    
