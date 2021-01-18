@@ -1,6 +1,6 @@
 import setuptools
 
-VERSION = "0.2.2"
+VERSION = "1.0.0"
 
 setuptools.setup(
     name='daktylos',
@@ -12,11 +12,10 @@ setuptools.setup(
     packages=setuptools.find_packages('src'),
     entry_points={
     },
-    classifiers=["Framework :: Metrics",
-                 "Development Status :: 4 - Alpha",
+    classifiers=[
                  "License :: OSI Approved :: BSD License"],
     license='BSD 2-CLAUSE',
-    keywrds='metrics validation capture',
+    keywords='metrics validation capture',
     url='https://github.com/nak/daktylos',
     download_url="https://github.com/daktylos/dist/%s" % VERSION,
     install_requires=[
