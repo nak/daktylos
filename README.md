@@ -19,11 +19,14 @@ The datastore object can also be used to retrieve data as an array of composite 
 
 ```python
 # latest 200 metrics as an array of instances of MetricDataClass:
-datastore.dataclass_metrics_by_volume(metric_name="TopLevelMetricName", typ=MetricDataClass, count=200)
-# latest 200 metrics as an array of daktylos's `<CompositeMetric>` class as a prommatic hierarhcy of data:
+datastore.dataclass_metrics_by_volume(metric_name="TopLevelMetricName",
+    typ=MetricDataClass, count=200)
+# latest 200 metrics as an array of daktylos's `<CompositeMetric>` class
+# (a programmatic hierarhcy of data), but only for metrics collected on Linux platforms:
 datastore.composite_metrics_by_volume(metric_name="TopLevelMetricName", count=200, 
     metadata_filter={"platform": "Liunx"})
-# metrics over the past 10 days, returned as a dictionary keyed on field name with value as an array of floats
+# metrics over the past 10 days, returned as a dictionary keyed on field name
+# with value as an array of floats
 datastore.metric_fields_by_date(metric_name="TopLevelMetricName", 
     oldest=datatime.now() - datetime.timedelta(days=10))
 ```
