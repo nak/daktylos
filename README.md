@@ -1,14 +1,15 @@
 # daktylos
 Daktylos can be used with sqlalchemy-supported databases, and comes with MySQL and Amazon Redshift support.  To use the SQL modules, there are separate requirements-sql.txt and requkirement-redshift.txt files to install dependencies.  Database creation is automatically handled when connecting to the database, if preferred.  
 
-To connect to a database to store composite metrics, store the composite metrics in a hiearchical Python dataclass and post. For example, if you have an instance of a dataclass, "metricdata", to store, and an engine created via sqlalchemy, 
+To connect to a database to store composite metrics, store the composite metrics in a hiearchical Python dataclass and post. For example, if you have an instance of a dataclass, `<metricdata>`, to store, and an engine created via sqlalchemy, 
 the code would look like:
 
+```python
 from daktylos.data_stores import SQLMetricStore
 
 with SQLMetricStore(engine, create=True) as datastore:
     datastore.post(metric_name="TopLevelMetricName", metric_data=metricdata)
-    
+```
     
 The post call can also take a dict of metadata, whose keys are of type str and whose value are of type str or int.  This 
 metadata will be associated with the composite metric and can be recalled along with the metric data when queried.  It can 
